@@ -115,6 +115,18 @@ impl HTX {
         assert_eq!(amount, 0);
         push_right
     }
+
+    pub fn leftmost_ref(&self) -> usize {
+        for store in &self.out {
+            match store {
+                Store::Slice(slice) => {
+                    return slice.start as usize;
+                }
+                _ => {}
+            }
+        }
+        self.index
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -151,8 +163,23 @@ pub enum HtxBlock {
 impl HtxBlock {
     pub fn push_left(&mut self, amount: u32) {
         match self {
-            HtxBlock::StatusLine(_) => {
-                unreachable!("First block can't be packed");
+            HtxBlock::StatusLine(StatusLine::Request {
+                method,
+                scheme,
+                authority,
+                path,
+                uri,
+                ..
+            }) => {
+                method.push_left(amount);
+                scheme.push_left(amount);
+                authority.push_left(amount);
+                path.push_left(amount);
+                uri.push_left(amount);
+            }
+            HtxBlock::StatusLine(StatusLine::Response { status, reason, .. }) => {
+                status.push_left(amount);
+                reason.push_left(amount);
             }
             HtxBlock::Header(header) => {
                 header.key.push_left(amount);
@@ -260,12 +287,11 @@ impl Store {
         match self {
             Store::Empty => (amount, None, None),
             Store::Slice(slice) => {
-                let end = slice.end();
-                let (remaining, opt) = slice.consume(amount);
-                (remaining, Some(end), opt.map(Store::Slice))
+                let (remaining, push_right, opt) = slice.consume(amount);
+                (remaining, Some(push_right), opt.map(Store::Slice))
             }
             Store::Deported(slice) => {
-                let (remaining, opt) = slice.consume(amount);
+                let (remaining, _, opt) = slice.consume(amount);
                 (remaining, None, opt.map(Store::Slice))
             }
             Store::Static(data) => {
@@ -322,13 +348,14 @@ impl Slice {
         }
     }
 
-    pub fn consume(self, amount: usize) -> (usize, Option<Slice>) {
+    pub fn consume(self, amount: usize) -> (usize, usize, Option<Slice>) {
         if amount >= self.len as usize {
-            (amount - self.len as usize, None)
+            (amount - self.len(), self.end(), None)
         } else {
             let Slice { start, len } = self;
             (
                 0,
+                self.end() - amount,
                 Some(Slice {
                     start: start + (amount as u32),
                     len: len - (amount as u32),

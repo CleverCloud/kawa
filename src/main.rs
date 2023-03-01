@@ -5,7 +5,7 @@ use parser::{compare_no_case, crlf, parse_chunk_header, parse_header, parse_requ
 mod htx;
 mod parser;
 
-use htx::{Chunk, Header, HtxBodySize, HtxParsingPhase, HtxKind, StatusLine, Store, Version, HTX};
+use htx::{Chunk, Header, HtxBodySize, HtxKind, HtxParsingPhase, StatusLine, Store, Version, HTX};
 use nom::{Err as NomError, Offset, ParseTo};
 
 use crate::{
@@ -315,10 +315,12 @@ fn test_partial_with_push(htx_type: HtxKind, mut fragments: Vec<&[u8]>) {
         let result = writer.write_vectored(&out);
         println!("{result:?}");
         let push_left = htx.consume(result.unwrap());
-        println!("{push_left:?}");
+        let leftmost = htx.leftmost_ref();
 
         let result = unsafe { std::str::from_utf8_unchecked(writer.buffer()) };
         println!("===============================\n{result}\n===============================");
+
+        println!("{push_left} {leftmost}");
 
         let request = unsafe { std::str::from_utf8_unchecked(&buf) };
         println!("===============================\n{request}\n===============================");
@@ -386,7 +388,8 @@ Trailer: Foo\r
 \r
 4",
             b"\r
-Wiki\r
+Wi",
+            b"ki\r
 5\r
 pedia\r
 0",
