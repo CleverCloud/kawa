@@ -1,4 +1,3 @@
-mod bytes;
 pub mod converter;
 pub mod parser;
 

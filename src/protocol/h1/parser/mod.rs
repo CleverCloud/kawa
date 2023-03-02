@@ -1,13 +1,14 @@
 use std::cmp::min;
 
-use crate::protocol::h1::bytes::{
+use nom::{Err as NomError, Offset, ParseTo};
+
+mod primitives;
+
+use crate::htx::{Chunk, Htx, HtxBlock, HtxBodySize, HtxKind, HtxParsingPhase, StatusLine, Store};
+use crate::protocol::h1::parser::primitives::{
     compare_no_case, crlf, parse_chunk_header, parse_header, parse_request_line,
     parse_response_line,
 };
-
-use crate::htx::{Chunk, Htx, HtxBlock, HtxBodySize, HtxKind, HtxParsingPhase, StatusLine, Store};
-
-use nom::{Err as NomError, Offset, ParseTo};
 
 fn handle_error<E>(htx: &Htx, error: NomError<E>) -> HtxParsingPhase {
     match error {
@@ -171,8 +172,7 @@ pub fn parse(htx: &mut Htx) {
             },
             HtxParsingPhase::Terminated | HtxParsingPhase::Error => break,
         };
-        let new_head = htx.storage.buffer.offset(i);
-        htx.storage.head = new_head;
+        htx.storage.head = htx.storage.buffer.offset(i);
         if need_processing {
             process_headers(htx);
             need_processing = false;

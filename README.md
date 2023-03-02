@@ -4,27 +4,27 @@ Agnostic representation of HTTP1 and HTTP2, with zero-copy, made for Sōzu.
 
 # Principles
 
-Consider the following HTTP/1.1 response:
+Consider the following HTTP/1.1 response stored in an `HtxBuffer`:
 
 ```txt
 HTTP/1.1 200 OK
-Transfer-Encoding: chunked
+Transfer-Encoding: chunked     // the body of the response is streamed
 Connection: Keep-Alive
 User-Agent: curl/7.43.0
-Trailer: Foo
+Trailer: Foo                   // declares a trailer header named "Foo"
 
-4
+4                              // declares one chunk of 4 bytes
 Wiki
-5
+5                              // declares one chunk of 5 bytes
 pedia
-0
-Foo: bar
+0                              // declares one chunk of 0 byte (the last chunk)
+Foo: bar                       // trailer header "Foo"
 
 ```
 
 ## HTX generic representation
 
-It can be parsed in placed, extracting the essential content (header names, values...)
+It can be parsed in place, extracting the essential content (header names, values...)
 and stored as a vector of HTX blocks. HTX is an intermediary, protocol agnostic, representation of HTTP:
 
 ```rs
@@ -42,7 +42,7 @@ htx_blocks: [
 ## Reference buffer content with Slices
 
 Note that `HtxBlocks` never copy data. They reference parts of the request using `Store::Slices`
-which only holds a start index and a length. The request buffer can viewed as followed, marking
+which only holds a start index and a length. The `HtxBuffer` can be viewed as followed, marking
 the referenced data in braces:
 
 ```txt
@@ -81,9 +81,9 @@ using the generic HTX representation:
     htx_blocks[6].val.modify("bazz");
 ```
 
-> note: `modify` should only be used with dynamic values that will be dropped to give then a proper lifetime
-> for static values (like "close") use a `Store::Static` instead, this is only for the example.
-> `htx_blocks[2].val = Static("close")` would be more efficient
+> note: `modify` should only be used with dynamic values that will be dropped to give then a proper lifetime.
+> For static values (like "close") use a `Store::Static` instead, this is only for the example.
+> `htx_blocks[2].val = Static("close")` would be more efficient.
 
 ```rs
 htx_blocks: [
@@ -190,9 +190,12 @@ Foo: bazz
 
 ```
 
+## Memory management
+
 Say the socket only wrote up to "Wi" of "Wikipedia" (109 bytes).
-In order to free this space, we can ask HTX to consume 109 bytes from its out vector.
-Walking and discarding the Stores it remains:
+After each write, `Htx::consume` should be called with the number of bytes written.
+This signals HTX to free unecessary `Stores` from its `out` vector and reclaim space in its `HtxBuffer` if possible.
+In our case, Walking and discarding the `Stores` from `out` it remains:
 
 ```rs
 out: [
@@ -224,9 +227,11 @@ pedia
 
 ```
 
-This can be measured with `HTX::leftmost_ref` which returns the start of the leftmost Slice,
-indicating that everything before that point in the buffer can be freed. Here it would return 115.
-In case the user pushes left the content of the buffer, here is the buffer after the push:
+This can be measured with `Htx::leftmost_ref` which returns the start of the leftmost `Store::Slice`,
+indicating that everything before that point in the `HtxBuffer` is unused. Here it would return 115.
+`HtxBuffer::consume` will be called with this value. In case the `HtxBuffer` considers that it should
+shift its data to free this space (`HtxBuffer::should_shift`), `HtxBuffer::shift` is called memmoving
+the data back to the start of the buffer. The buffer would look like:
 
 ```txt
 ki
@@ -237,7 +242,11 @@ Foo: bar
 
 ```
 
-As a result, the remaining Slices in the out vector reference data that has been moved.
+> note: this is the only instance of copying data in this module and is necessary to not run out of
+> memory unless we change the data structure of `HtxBuffer` (with a real ring buffer for example).
+> Nevertheless this should be negligeable with most shifts copying 0 or very few bytes.
+
+As a result, the remaining `Store::Slices` in the out vector reference data that has been moved.
 
 ```rs
 out: [
@@ -250,7 +259,7 @@ out: [
 ]
 ```
 
-In order to synchronize the slices with the new buffer, `HTX::push_left` must be called with the
+In order to synchronize the `Store::Slices` with the new buffer, `Htx::push_left` is called with the
 amount of bytes discarded to realigned the data:
 
 ```rs
