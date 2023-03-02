@@ -1,123 +1,72 @@
 use std::io::Write;
 
-use htx::HtxKind;
-
-use crate::htx::{debug_htx, HTX};
-
 mod htx;
 mod protocol;
 
+use htx::{debug_htx, storage::HtxBuffer, Htx, HtxKind};
 use protocol::h1;
 
-fn test(htx_type: HtxKind, buf: &[u8]) {
-    let buf = &mut buf.to_vec();
-    let mut htx = HTX::new(htx_type);
-    debug_htx(&htx, buf);
+fn test(htx_type: HtxKind, storage: HtxBuffer, fragment: &[u8]) {
+    let mut htx = Htx::new(htx_type, storage);
+    let _ = htx.storage.write(fragment).expect("WRITE");
+    debug_htx(&htx);
 
-    h1::parse(&mut htx, buf);
-    debug_htx(&htx, buf);
+    h1::parse(&mut htx);
+    debug_htx(&htx);
 
     htx.prepare(h1::block_converter);
-    debug_htx(&htx, buf);
+    debug_htx(&htx);
 
-    let out = htx.as_io_slice(buf);
+    let out = htx.as_io_slice();
     println!("{out:?}");
     let mut writer = std::io::BufWriter::new(Vec::new());
-    let result = writer.write_vectored(&out);
-    println!("{result:?}");
-    let push_left = htx.consume(result.unwrap());
-    println!("{push_left:?}");
-
+    let amount = writer.write_vectored(&out).expect("WRITE");
     let result = unsafe { std::str::from_utf8_unchecked(writer.buffer()) };
     println!("===============================\n{result}\n===============================");
 
-    let request = unsafe { std::str::from_utf8_unchecked(buf) };
-    println!("===============================\n{request}\n===============================");
+    let buffer = unsafe { std::str::from_utf8_unchecked(htx.storage.used()) };
+    println!("===============================\n{buffer}\n===============================");
 
-    debug_htx(&htx, buf);
+    htx.consume(amount);
+    println!("{amount}");
+    debug_htx(&htx);
 }
 
-fn test_partial(htx_type: HtxKind, mut fragments: Vec<&[u8]>) {
-    let mut buf = Vec::new();
+fn test_partial(htx_type: HtxKind, storage: HtxBuffer, mut fragments: Vec<&[u8]>) {
     let mut writer = std::io::BufWriter::new(Vec::new());
-    let mut htx = HTX::new(htx_type);
+    let mut htx = Htx::new(htx_type, storage);
 
     while !fragments.is_empty() {
         let fragment = fragments.remove(0);
-        buf.extend_from_slice(fragment);
-        let request = unsafe { std::str::from_utf8_unchecked(&buf) };
-        println!("===============================\n{request}\n===============================");
-        debug_htx(&htx, &buf);
+        let _ = htx.storage.write(fragment).expect("WRITE");
 
-        h1::parse(&mut htx, &mut buf);
-        debug_htx(&htx, &buf);
+        let buffer = unsafe { std::str::from_utf8_unchecked(htx.storage.used()) };
+        println!("===============================\n{buffer}\n===============================");
+        debug_htx(&htx);
+
+        h1::parse(&mut htx);
+        debug_htx(&htx);
 
         htx.prepare(h1::block_converter);
-        debug_htx(&htx, &buf);
+        debug_htx(&htx);
 
-        let out = htx.as_io_slice(&buf);
+        let out = htx.as_io_slice();
         println!("{out:?}");
-        let result = writer.write_vectored(&out);
-        println!("{result:?}");
-        let push_left = htx.consume(result.unwrap());
-        println!("{push_left:?}");
-
-        buf.drain(..push_left);
-        htx.push_left(push_left as u32);
+        let amount = writer.write_vectored(&out).expect("WRITE");
+        println!("{amount:?}");
+        htx.consume(amount);
 
         let result = unsafe { std::str::from_utf8_unchecked(writer.buffer()) };
         println!("===============================\n{result}\n===============================");
     }
-}
-
-fn test_partial_with_push(htx_type: HtxKind, mut fragments: Vec<&[u8]>) {
-    let mut buf = Vec::new();
-    let mut writer = std::io::BufWriter::new(Vec::new());
-    let mut htx = HTX::new(htx_type);
-
-    while !fragments.is_empty() {
-        let fragment = fragments.remove(0);
-        buf.extend_from_slice(fragment);
-
-        let out = htx.as_io_slice(&buf);
-        println!("{out:?}");
-        let result = writer.write_vectored(&out);
-        println!("{result:?}");
-        let push_left = htx.consume(result.unwrap());
-        let leftmost = htx.leftmost_ref();
-
-        let result = unsafe { std::str::from_utf8_unchecked(writer.buffer()) };
-        println!("===============================\n{result}\n===============================");
-
-        println!("{push_left} {leftmost}");
-
-        let request = unsafe { std::str::from_utf8_unchecked(&buf) };
-        println!("===============================\n{request}\n===============================");
-
-        let p1 = push_left / 2;
-        let p2 = push_left - p1;
-
-        debug_htx(&htx, &buf);
-
-        h1::parse(&mut htx, &mut buf);
-        debug_htx(&htx, &buf);
-
-        buf.drain(..p1);
-        htx.push_left(p1 as u32);
-        debug_htx(&htx, &buf);
-
-        htx.prepare(h1::block_converter);
-        debug_htx(&htx, &buf);
-
-        buf.drain(..p2);
-        htx.push_left(p2 as u32);
-        debug_htx(&htx, &buf);
-    }
+    debug_htx(&htx);
 }
 
 fn main() {
+    let mut buffer = vec![0; 512];
     test(
         HtxKind::Request,
+        HtxBuffer::new(&mut buffer),
         b"POST /cgi-bin/process.cgi HTTP/1.1\r
 User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
 Host: www.tutorialspoint.com\r
@@ -132,6 +81,7 @@ licenseID=string&content=string&/paramsXML=string",
 
     test(
         HtxKind::Response,
+        HtxBuffer::new(&mut buffer[..128]),
         b"HTTP/1.1 200 OK\r
 Transfer-Encoding: chunked\r
 Connection: Keep-Alive\r
@@ -147,8 +97,9 @@ Foo: bar\r
 ",
     );
 
-    test_partial_with_push(
+    test_partial(
         HtxKind::Response,
+        HtxBuffer::new(&mut buffer[..128]),
         vec![
             b"HTTP/1.1 200 OK\r
 Transfer-Encoding: chunked\r

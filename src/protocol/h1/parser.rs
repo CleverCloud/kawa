@@ -5,22 +5,22 @@ use crate::protocol::h1::bytes::{
     parse_response_line,
 };
 
-use crate::htx::{Chunk, HtxBlock, HtxBodySize, HtxKind, HtxParsingPhase, StatusLine, Store, HTX};
+use crate::htx::{Chunk, Htx, HtxBlock, HtxBodySize, HtxKind, HtxParsingPhase, StatusLine, Store};
 
 use nom::{Err as NomError, Offset, ParseTo};
 
-fn handle_error<E>(htx: &mut HTX, error: NomError<E>) {
+fn handle_error<E>(htx: &Htx, error: NomError<E>) -> HtxParsingPhase {
     match error {
-        NomError::Error(_) | NomError::Failure(_) => {
-            htx.parsing_phase = HtxParsingPhase::Error;
-        }
-        NomError::Incomplete(_) => {}
+        NomError::Error(_) | NomError::Failure(_) => HtxParsingPhase::Error,
+        NomError::Incomplete(_) => htx.parsing_phase,
     }
 }
 
-fn process_headers(htx: &mut HTX, buf: &mut [u8]) {
+fn process_headers(htx: &mut Htx) {
+    let buf = &mut htx.storage.buffer;
     let mut host = Store::Empty;
     for block in &mut htx.blocks {
+        #[allow(clippy::single_match)]
         match block {
             HtxBlock::Header(header) => {
                 let key = header.key.data(buf).expect("Header key missing");
@@ -58,14 +58,16 @@ fn process_headers(htx: &mut HTX, buf: &mut [u8]) {
         Some(HtxBlock::StatusLine(StatusLine::Request { authority, .. })) => {
             *authority = host;
         }
-        _ => {}
+        Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => {}
+        _ => unreachable!(),
     };
 }
 
-pub fn parse(htx: &mut HTX, buf: &mut [u8]) {
+pub fn parse(htx: &mut Htx) {
     let mut need_processing = false;
     loop {
-        let unparsed_buf = &buf[htx.index..];
+        let unparsed_buf = htx.storage.unparsed_data();
+        let buf = htx.storage.buffer();
         if unparsed_buf.is_empty() {
             break;
         }
@@ -78,7 +80,7 @@ pub fn parse(htx: &mut HTX, buf: &mut [u8]) {
                 let (i, status_line) = match status_line {
                     Ok(ok) => ok,
                     Err(error) => {
-                        handle_error(htx, error);
+                        htx.parsing_phase = handle_error(htx, error);
                         break;
                     }
                 };
@@ -102,14 +104,14 @@ pub fn parse(htx: &mut HTX, buf: &mut [u8]) {
                         i
                     }
                     Err(error) => {
-                        handle_error(htx, error);
+                        htx.parsing_phase = handle_error(htx, error);
                         break;
                     }
                 },
             },
             HtxParsingPhase::Body => {
-                let length = unparsed_buf.len();
-                let taken = min(length, htx.expects);
+                let len = unparsed_buf.len();
+                let taken = min(len, htx.expects);
                 htx.expects -= taken;
                 htx.blocks.push(HtxBlock::Chunk(Chunk {
                     data: Store::new_slice(buf, &unparsed_buf[..taken]),
@@ -124,7 +126,7 @@ pub fn parse(htx: &mut HTX, buf: &mut [u8]) {
                     let (i, chunk_size) = match parse_chunk_header(unparsed_buf) {
                         Ok(ok) => ok,
                         Err(error) => {
-                            handle_error(htx, error);
+                            htx.parsing_phase = handle_error(htx, error);
                             break;
                         }
                     };
@@ -138,8 +140,8 @@ pub fn parse(htx: &mut HTX, buf: &mut [u8]) {
                     }
                     i
                 } else {
-                    let length = unparsed_buf.len();
-                    let taken = min(length, htx.expects);
+                    let len = unparsed_buf.len();
+                    let taken = min(len, htx.expects);
                     htx.expects -= taken;
                     htx.blocks.push(HtxBlock::Chunk(Chunk {
                         data: Store::new_slice(buf, &unparsed_buf[..taken]),
@@ -162,21 +164,22 @@ pub fn parse(htx: &mut HTX, buf: &mut [u8]) {
                         i
                     }
                     Err(error) => {
-                        handle_error(htx, error);
+                        htx.parsing_phase = handle_error(htx, error);
                         break;
                     }
                 },
             },
             HtxParsingPhase::Terminated | HtxParsingPhase::Error => break,
         };
-        htx.index = buf.offset(i);
+        let new_head = htx.storage.buffer.offset(i);
+        htx.storage.head = new_head;
         if need_processing {
-            process_headers(htx, buf);
+            process_headers(htx);
             need_processing = false;
             htx.parsing_phase = match htx.body_size {
                 HtxBodySize::Empty => HtxParsingPhase::Terminated,
                 HtxBodySize::Chunked => {
-                    htx.index -= 2;
+                    htx.storage.head -= 2; // FIXME: THIS IS WRONG AND DANGEROUS!
                     HtxParsingPhase::Chunks
                 }
                 HtxBodySize::Length(length) => {
