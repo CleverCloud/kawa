@@ -4,7 +4,6 @@ use nom::{
         is_alphanumeric, is_space,
         streaming::{char, hex_digit1, one_of},
     },
-    combinator::map_res,
     error::{make_error, ErrorKind as NomErrorKind, ParseError},
     sequence::tuple,
     Err as NomError, IResult,
@@ -12,8 +11,8 @@ use nom::{
 
 use crate::htx::{Header, StatusLine, Store, Version};
 
-fn error_position<I, E: ParseError<I>>(input: I, kind: NomErrorKind) -> NomError<E> {
-    NomError::Error(make_error(input, kind))
+fn error_position<I, E: ParseError<I>>(i: I, kind: NomErrorKind) -> NomError<E> {
+    NomError::Error(make_error(i, kind))
 }
 
 pub fn compare_no_case(left: &[u8], right: &[u8]) -> bool {
@@ -175,15 +174,23 @@ fn is_single_header_value_char(i: u8) -> bool {
     (i > 33 && i <= 126 && i != 44) || i >= 160
 }
 
-pub fn chunk_size(input: &[u8]) -> IResult<&[u8], usize> {
-    let (i, s) = map_res(hex_digit1, std::str::from_utf8)(input)?;
-    match usize::from_str_radix(s, 16) {
-        Ok(sz) => Ok((i, sz)),
-        Err(_) => Err(error_position(input, NomErrorKind::MapRes)),
+pub fn chunk_size(i: &[u8]) -> IResult<&[u8], (&[u8], usize)> {
+    let (i, size_hexa) = hex_digit1(i)?;
+    let size = std::str::from_utf8(size_hexa)
+        .ok()
+        .and_then(|chunk_size| usize::from_str_radix(chunk_size, 16).ok());
+    match size {
+        Some(size) => Ok((i, (size_hexa, size))),
+        None => Err(error_position(i, NomErrorKind::MapRes)),
     }
 }
 
-pub fn parse_chunk_header(i: &[u8]) -> IResult<&[u8], usize> {
-    let (i, (_, size, _)) = tuple((crlf, chunk_size, crlf))(i)?;
-    Ok((i, size))
+pub fn parse_chunk_header(first: bool, i: &[u8]) -> IResult<&[u8], (&[u8], usize)> {
+    if first {
+        let (i, (size, _)) = tuple((chunk_size, crlf))(i)?;
+        Ok((i, size))
+    } else {
+        let (i, (_, size, _)) = tuple((crlf, chunk_size, crlf))(i)?;
+        Ok((i, size))
+    }
 }

@@ -1,6 +1,8 @@
-use crate::htx::{Chunk, Header, HtxBlock, StatusLine, Store, Version};
+use crate::htx::{
+    Chunk, ChunkHeader, Flags, Header, HtxBlock, HtxBodySize, StatusLine, Store, Version,
+};
 
-pub fn block_converter(block: HtxBlock, out: &mut Vec<Store>) {
+pub fn block_converter(_: &HtxBodySize, block: HtxBlock, out: &mut Vec<Store>) {
     match block {
         HtxBlock::StatusLine(StatusLine::Request {
             version,
@@ -42,8 +44,21 @@ pub fn block_converter(block: HtxBlock, out: &mut Vec<Store>) {
             out.push(val);
             out.push(Store::Static(b"\r\n"));
         }
-        HtxBlock::Chunk(Chunk { data }) => {
+        HtxBlock::ChunkHeader(ChunkHeader { length }) => {
+            out.push(length);
+            out.push(Store::Static(b"\r\n"));
+        }
+        HtxBlock::Chunk(Chunk { data, .. }) => {
             out.push(data);
+        }
+        HtxBlock::Flags(Flags {
+            end_header,
+            end_chunk,
+            ..
+        }) => {
+            if end_header || end_chunk {
+                out.push(Store::Static(b"\r\n"));
+            }
         }
     }
 }

@@ -1,9 +1,6 @@
 use std::fmt::Write;
 
-use crate::htx::{
-    repr::{Chunk, Header, Htx, HtxBlock, StatusLine, Store},
-    storage::HtxBuffer,
-};
+use crate::htx::{Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBuffer, StatusLine, Store};
 
 fn to_utf8(buf: Option<&[u8]>) -> &str {
     match buf {
@@ -35,6 +32,8 @@ impl Htx<'_> {
                 HtxBlock::StatusLine(block) => block.debug(buf, &block_pad, &mut result)?,
                 HtxBlock::Header(block) => block.debug(buf, &block_pad, &mut result)?,
                 HtxBlock::Chunk(block) => block.debug(buf, &block_pad, &mut result)?,
+                HtxBlock::ChunkHeader(block) => block.debug(buf, &block_pad, &mut result)?,
+                HtxBlock::Flags(block) => block.debug(buf, &block_pad, &mut result)?,
             }
             if i == self.blocks.len() - 1 {
                 result.write_fmt(format_args!(",\n{pad}  "))?;
@@ -104,6 +103,7 @@ impl StatusLine {
         Ok(())
     }
 }
+
 impl Header {
     pub fn debug(&self, buf: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
         let pad_field = format!("{pad}  ");
@@ -116,6 +116,18 @@ impl Header {
         Ok(())
     }
 }
+
+impl ChunkHeader {
+    pub fn debug(&self, buf: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
+        let pad_field = format!("{pad}  ");
+        result.write_fmt(format_args!("ChunkHeader {{"))?;
+        result.write_fmt(format_args!("\n{pad}  length: "))?;
+        self.length.debug(buf, &pad_field, result)?;
+        result.write_fmt(format_args!(",\n{pad}}}"))?;
+        Ok(())
+    }
+}
+
 impl Chunk {
     pub fn debug(&self, buf: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
         let pad_field = format!("{pad}  ");
@@ -126,6 +138,18 @@ impl Chunk {
         Ok(())
     }
 }
+
+impl Flags {
+    pub fn debug(&self, _: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
+        result.write_fmt(format_args!("Flags {{"))?;
+        result.write_fmt(format_args!("\n{pad}  end_chunk: {}", self.end_chunk))?;
+        result.write_fmt(format_args!(",\n{pad}  end_header: {}", self.end_header))?;
+        result.write_fmt(format_args!(",\n{pad}  end_stream: {}", self.end_stream))?;
+        result.write_fmt(format_args!(",\n{pad}}}"))?;
+        Ok(())
+    }
+}
+
 impl Store {
     pub fn debug(&self, buf: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
         match self {
@@ -166,6 +190,7 @@ impl Store {
         Ok(())
     }
 }
+
 impl HtxBuffer<'_> {
     pub fn debug(&self, pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
         result.write_fmt(format_args!("HtxBuffer {{"))?;

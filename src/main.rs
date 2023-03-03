@@ -3,7 +3,7 @@ use std::io::Write;
 mod htx;
 mod protocol;
 
-use htx::{debug_htx, storage::HtxBuffer, Htx, HtxKind};
+use htx::{debug_htx, Htx, HtxBuffer, HtxKind};
 use protocol::h1;
 
 fn test(htx_type: HtxKind, storage: HtxBuffer, fragment: &[u8]) {

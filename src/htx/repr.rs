@@ -1,6 +1,6 @@
 use std::io::IoSlice;
 
-use crate::htx::storage::HtxBuffer;
+use crate::htx::HtxBuffer;
 
 /// Intermediate representation for both H1 and H2 protocols
 pub struct Htx<'a> {
@@ -36,10 +36,10 @@ impl<'a> Htx<'a> {
         }
     }
 
-    pub fn prepare(&mut self, converter: impl Fn(HtxBlock, &mut Vec<Store>)) {
+    pub fn prepare(&mut self, converter: impl Fn(&HtxBodySize, HtxBlock, &mut Vec<Store>)) {
         self.blocks
             .drain(..)
-            .for_each(|block| converter(block, &mut self.out));
+            .for_each(|block| converter(&self.body_size, block, &mut self.out));
     }
 
     pub fn as_io_slice(&mut self) -> Vec<IoSlice> {
@@ -82,6 +82,10 @@ impl<'a> Htx<'a> {
         }
         self.storage.head
     }
+
+    pub fn terminated(&self) -> bool {
+        self.parsing_phase == HtxParsingPhase::Terminated
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,12 +94,12 @@ pub enum HtxKind {
     Response,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HtxParsingPhase {
     StatusLine,
     Headers,
     Body,
-    Chunks,
+    Chunks { first: bool },
     Trailers,
     Terminated,
     Error,
@@ -112,7 +116,9 @@ pub enum HtxBodySize {
 pub enum HtxBlock {
     StatusLine(StatusLine),
     Header(Header),
+    ChunkHeader(ChunkHeader),
     Chunk(Chunk),
+    Flags(Flags),
 }
 
 impl HtxBlock {
@@ -140,9 +146,13 @@ impl HtxBlock {
                 header.key.push_left(amount);
                 header.val.push_left(amount);
             }
+            HtxBlock::ChunkHeader(header) => {
+                header.length.push_left(amount);
+            }
             HtxBlock::Chunk(chunk) => {
                 chunk.data.push_left(amount);
             }
+            HtxBlock::Flags(_) => {}
         }
     }
 }
@@ -172,8 +182,20 @@ pub struct Header {
 }
 
 #[derive(Debug)]
+pub struct ChunkHeader {
+    pub length: Store,
+}
+
+#[derive(Debug)]
 pub struct Chunk {
     pub data: Store,
+}
+
+#[derive(Debug)]
+pub struct Flags {
+    pub end_chunk: bool,
+    pub end_header: bool,
+    pub end_stream: bool,
 }
 
 #[derive(Debug)]
@@ -188,6 +210,10 @@ pub enum Store {
 impl Store {
     pub fn new_slice(buffer: &[u8], data: &[u8]) -> Store {
         Store::Slice(Slice::new(buffer, data))
+    }
+
+    pub fn new_vec(data: &[u8]) -> Store {
+        Store::Vec(data.to_vec(), 0)
     }
 
     pub fn push_left(&mut self, amount: u32) {
