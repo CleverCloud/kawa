@@ -65,7 +65,6 @@ impl StatusLine {
             StatusLine::Request {
                 version,
                 method,
-                scheme,
                 authority,
                 path,
                 uri,
@@ -74,8 +73,6 @@ impl StatusLine {
                 result.write_fmt(format_args!("\n{pad}  version: {version:?}"))?;
                 result.write_fmt(format_args!(",\n{pad}  method: "))?;
                 method.debug(buf, &pad_field, result)?;
-                result.write_fmt(format_args!(",\n{pad}  scheme: "))?;
-                scheme.debug(buf, &pad_field, result)?;
                 result.write_fmt(format_args!(",\n{pad}  authority: "))?;
                 authority.debug(buf, &pad_field, result)?;
                 result.write_fmt(format_args!(",\n{pad}  path: "))?;
@@ -182,8 +179,8 @@ impl Store {
             Store::Vec(data, index) => {
                 result.write_fmt(format_args!(
                     "Store::Vec({:?}, {:?})",
-                    to_utf8(Some(&data[..*index])),
-                    to_utf8(Some(&data[*index..]))
+                    to_utf8(Some(&data[..*index as usize])),
+                    to_utf8(Some(&data[*index as usize..]))
                 ))?;
             }
         }

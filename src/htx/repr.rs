@@ -8,7 +8,6 @@ pub struct Htx<'a> {
     pub storage: HtxBuffer<'a>,
     pub blocks: Vec<HtxBlock>,
     pub out: Vec<Store>,
-    /// the start of the unparsed area in the buffer
     pub expects: usize,
     pub parsing_phase: HtxParsingPhase,
     pub body_size: HtxBodySize,
@@ -86,6 +85,10 @@ impl<'a> Htx<'a> {
     pub fn terminated(&self) -> bool {
         self.parsing_phase == HtxParsingPhase::Terminated
     }
+
+    pub fn in_error(&self) -> bool {
+        self.parsing_phase == HtxParsingPhase::Error
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -126,14 +129,12 @@ impl HtxBlock {
         match self {
             HtxBlock::StatusLine(StatusLine::Request {
                 method,
-                scheme,
                 authority,
                 path,
                 uri,
                 ..
             }) => {
                 method.push_left(amount);
-                scheme.push_left(amount);
                 authority.push_left(amount);
                 path.push_left(amount);
                 uri.push_left(amount);
@@ -162,7 +163,6 @@ pub enum StatusLine {
     Request {
         version: Version,
         method: Store,
-        scheme: Store,
         authority: Store,
         path: Store,
         uri: Store,
@@ -202,9 +202,10 @@ pub struct Flags {
 pub enum Store {
     Empty,
     Slice(Slice),
+    #[allow(dead_code)]
     Deported(Slice),
     Static(&'static [u8]),
-    Vec(Vec<u8>, usize),
+    Vec(Box<[u8]>, u32),
 }
 
 impl Store {
@@ -213,7 +214,7 @@ impl Store {
     }
 
     pub fn new_vec(data: &[u8]) -> Store {
-        Store::Vec(data.to_vec(), 0)
+        Store::Vec(data.to_vec().into_boxed_slice(), 0)
     }
 
     pub fn push_left(&mut self, amount: u32) {
@@ -233,7 +234,7 @@ impl Store {
             Store::Empty => None,
             Store::Slice(slice) | Store::Deported(slice) => slice.data(buf),
             Store::Static(data) => Some(data),
-            Store::Vec(data, index) => Some(&data[*index..]),
+            Store::Vec(data, index) => Some(&data[*index as usize..]),
         }
     }
 
@@ -245,7 +246,7 @@ impl Store {
             Store::Slice(_) => {}
         }
         match self {
-            Store::Empty | Store::Static(_) => *self = Store::Vec(new_value.to_vec(), 0),
+            Store::Empty | Store::Static(_) | Store::Vec(..) => *self = Store::new_vec(new_value),
             Store::Slice(slice) | Store::Deported(slice) => {
                 let new_len = new_value.len();
                 if slice.len() >= new_len {
@@ -254,12 +255,8 @@ impl Store {
                     buf[start..end].copy_from_slice(new_value);
                     slice.len = new_len as u32;
                 } else {
-                    *self = Store::Vec(new_value.to_vec(), 0)
+                    *self = Store::new_vec(new_value)
                 }
-            }
-            Store::Vec(vec, _) => {
-                vec.clear();
-                vec.extend_from_slice(new_value);
             }
         }
     }
@@ -283,10 +280,10 @@ impl Store {
                 }
             }
             Store::Vec(data, index) => {
-                if amount >= data.len() - index {
-                    (amount - data.len() + index, None)
+                if amount >= data.len() - index as usize {
+                    (amount - data.len() + index as usize, None)
                 } else {
-                    (0, Some(Store::Vec(data, index + amount)))
+                    (0, Some(Store::Vec(data, index + amount as u32)))
                 }
             }
         }

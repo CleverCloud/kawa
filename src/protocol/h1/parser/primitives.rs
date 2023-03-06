@@ -1,9 +1,13 @@
 use nom::{
-    bytes::streaming::{tag, take, take_while},
+    bytes::{
+        complete::take_while,
+        streaming::{tag, take},
+    },
     character::{
         is_alphanumeric, is_space,
         streaming::{char, hex_digit1, one_of},
     },
+    combinator::opt,
     error::{make_error, ErrorKind as NomErrorKind, ParseError},
     sequence::tuple,
     Err as NomError, IResult,
@@ -51,7 +55,7 @@ fn space(i: &[u8]) -> IResult<&[u8], char> {
 }
 
 pub fn crlf(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    tag("\r\n")(i)
+    tag(b"\r\n")(i)
 }
 
 fn is_vchar(i: u8) -> bool {
@@ -117,7 +121,6 @@ pub fn parse_request_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], S
             version,
             method: Store::new_slice(buffer, method),
             uri: Store::new_slice(buffer, uri),
-            scheme: Store::Static(b"HTTP"),
             authority: Store::Empty,
             path: Store::Empty,
         },
@@ -192,5 +195,87 @@ pub fn parse_chunk_header(first: bool, i: &[u8]) -> IResult<&[u8], (&[u8], usize
     } else {
         let (i, (_, size, _)) = tuple((crlf, chunk_size, crlf))(i)?;
         Ok((i, size))
+    }
+}
+
+fn is_scheme_char(i: u8) -> bool {
+    is_alphanumeric(i) || b"+-.".contains(&i)
+}
+fn is_authority_char(i: u8) -> bool {
+    !b"/?#".contains(&i)
+}
+fn is_userinfo_char(i: u8) -> bool {
+    !b"/?#\\@".contains(&i)
+}
+fn userinfo(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    let (i, (userinfo, _)) = tuple((take_while(is_userinfo_char), tag(b"@")))(i)?;
+    Ok((i, userinfo))
+}
+
+/// ```txt
+/// server-wide:         OPTIONS * HTTP/1.1                                      -> (Empty, "*")
+/// origin:              OPTIONS /index.html                                     -> (Empty, "/index.html")
+/// absolute+empty path: OPTIONS http://www.example.org:8001 HTTP/1.1            -> ("www.example.org:8001", "*")
+/// absolute:            OPTIONS http://www.example.org:8001/index.html HTTP/1.1 -> ("www.example.org:8001", "/index.html")
+/// ```
+fn parse_asterisk_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
+    if i == b"*" {
+        Ok((i, (Store::Static(b"*"), Store::Empty)))
+    } else if i[0] == b'/' {
+        parse_origin_form(buffer, i)
+    } else {
+        parse_absolute_form(buffer, i)
+    }
+}
+/// ```txt
+/// www.example.org:8001 -> ("www.example.org:8001", Empty)
+/// ```
+fn parse_authority_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
+    Ok((&[], (Store::new_slice(buffer, i), Store::Empty)))
+}
+/// ```txt
+/// /index.html?k=v#h -> (Empty, "/index.html?k=v#h")
+/// ```
+fn parse_origin_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
+    Ok((&[], (Store::Empty, Store::new_slice(buffer, i))))
+}
+/// ```txt
+/// http://www.example.org:8001                            -> ("www.example.org:8001", Empty)
+/// http://www.example.org:8001?k=v#h                      -> ("www.example.org:8001", "?k=v#h")
+/// http://www.example.org:8001/index.html?k=v#h           -> ("www.example.org:8001", "/index.html?k=v#h")
+/// http://user:pass@www.example.org:8001/index.html?k=v#h -> ("www.example.org:8001", "/index.html?k=v#h")
+/// ```
+fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
+    let (path, (_scheme, _, _userinfo, authority)) = tuple((
+        take_while(is_scheme_char),
+        tag(b"://"),
+        opt(userinfo),
+        take_while(is_authority_char),
+    ))(i)?;
+    Ok((
+        &[],
+        (
+            Store::new_slice(buffer, authority),
+            Store::new_slice(buffer, path),
+        ),
+    ))
+}
+
+pub fn parse_url<'a>(method: &[u8], buffer: &[u8], i: &'a [u8]) -> Option<(Store, Store)> {
+    if i.is_empty() {
+        return Some((Store::Empty, Store::Static(b"/")));
+    }
+    let url = if compare_no_case(method, b"OPTIONS") {
+        parse_asterisk_form(buffer, i)
+    } else if compare_no_case(method, b"CONNECT") {
+        parse_authority_form(buffer, i)
+    } else if i[0] == b'/' {
+        parse_origin_form(buffer, i)
+    } else {
+        parse_authority_form(buffer, i)
+    };
+    match url {
+        Ok((_, url)) => Some(url),
+        _ => None,
     }
 }

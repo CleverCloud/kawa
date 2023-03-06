@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::mem;
 
 use nom::{Err as NomError, Offset, ParseTo};
 
@@ -10,7 +11,7 @@ use crate::htx::{
 };
 use crate::protocol::h1::parser::primitives::{
     compare_no_case, crlf, parse_chunk_header, parse_header, parse_request_line,
-    parse_response_line,
+    parse_response_line, parse_url,
 };
 
 fn handle_error<E>(htx: &Htx, error: NomError<E>) -> HtxParsingPhase {
@@ -22,7 +23,27 @@ fn handle_error<E>(htx: &Htx, error: NomError<E>) -> HtxParsingPhase {
 
 fn process_headers(htx: &mut Htx) {
     let buf = &mut htx.storage.buffer;
-    let mut host = Store::Empty;
+
+    let (mut authority, path) = match htx.blocks.get_mut(0) {
+        Some(HtxBlock::StatusLine(StatusLine::Request {
+            uri: Store::Slice(uri),
+            method,
+            ..
+        })) => {
+            let uri = uri.data(buf).expect("URI missing");
+            let method = method.data(buf).expect("Method missing");
+            match parse_url(buf, method, uri) {
+                Some((authority, path)) => (authority, path),
+                _ => {
+                    htx.parsing_phase = HtxParsingPhase::Error;
+                    return;
+                }
+            }
+        }
+        Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => (Store::Empty, Store::Empty),
+        _ => unreachable!(),
+    };
+
     for block in &mut htx.blocks {
         #[allow(clippy::single_match)]
         match block {
@@ -31,10 +52,11 @@ fn process_headers(htx: &mut Htx) {
                 if compare_no_case(key, b"connection") {
                     header.val.modify(buf, b"close")
                 } else if compare_no_case(key, b"host") {
-                    host = match &header.val {
-                        Store::Slice(slice) => Store::Deported(slice.clone()),
-                        _ => unreachable!(),
-                    };
+                    // request line has higher priority than Host header
+                    if let Store::Empty = authority {
+                        mem::swap(&mut authority, &mut header.val);
+                    }
+                    header.key = Store::Empty; // Host header is elided
                 } else if compare_no_case(key, b"content-length") {
                     match htx.body_size {
                         HtxBodySize::Empty => {}
@@ -59,8 +81,13 @@ fn process_headers(htx: &mut Htx) {
         }
     }
     match htx.blocks.get_mut(0) {
-        Some(HtxBlock::StatusLine(StatusLine::Request { authority, .. })) => {
-            *authority = host;
+        Some(HtxBlock::StatusLine(StatusLine::Request {
+            authority: old_authority,
+            path: old_path,
+            ..
+        })) => {
+            *old_authority = authority;
+            *old_path = path;
         }
         Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => {}
         _ => unreachable!(),
@@ -201,6 +228,9 @@ pub fn parse(htx: &mut Htx) {
         htx.storage.head = htx.storage.buffer.offset(i);
         if need_processing {
             process_headers(htx);
+            if htx.in_error() {
+                return;
+            }
             need_processing = false;
             htx.parsing_phase = match htx.body_size {
                 HtxBodySize::Empty | HtxBodySize::Length(0) => HtxParsingPhase::Terminated,

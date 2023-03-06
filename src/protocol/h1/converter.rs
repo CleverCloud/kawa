@@ -8,6 +8,7 @@ pub fn block_converter(_: &HtxBodySize, block: HtxBlock, out: &mut Vec<Store>) {
             version,
             method,
             uri,
+            authority,
             ..
         }) => {
             let version = match version {
@@ -19,6 +20,8 @@ pub fn block_converter(_: &HtxBodySize, block: HtxBlock, out: &mut Vec<Store>) {
             out.push(uri);
             out.push(Store::Static(b" "));
             out.push(Store::Static(version));
+            out.push(Store::Static(b"\r\nHost: "));
+            out.push(authority);
             out.push(Store::Static(b"\r\n"));
         }
         HtxBlock::StatusLine(StatusLine::Response {
@@ -38,6 +41,9 @@ pub fn block_converter(_: &HtxBodySize, block: HtxBlock, out: &mut Vec<Store>) {
             out.push(reason);
             out.push(Store::Static(b"\r\n"));
         }
+        HtxBlock::Header(Header {
+            key: Store::Empty, ..
+        }) => {}
         HtxBlock::Header(Header { key, val }) => {
             out.push(key);
             out.push(Store::Static(b": "));
