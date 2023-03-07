@@ -8,3 +8,9 @@ pub use repr::{
     StatusLine, Store, Version,
 };
 pub use storage::HtxBuffer;
+
+pub trait HtxBlockConverter {
+    fn initialize(&mut self, _htx: &mut Htx) {}
+    fn call(&mut self, block: HtxBlock, htx: &mut Htx);
+    fn finalize(&mut self, _htx: &mut Htx) {}
+}

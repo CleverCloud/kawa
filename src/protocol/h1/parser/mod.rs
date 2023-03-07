@@ -92,7 +92,7 @@ fn process_headers(htx: &mut Htx) {
         Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => {}
         _ => unreachable!(),
     };
-    htx.blocks.push(HtxBlock::Header(Header {
+    htx.blocks.push_back(HtxBlock::Header(Header {
         key: Store::Static(b"Sozu-id"),
         val: Store::new_vec(format!("SOZUBALANCEID-{}", htx.storage.head).as_bytes()),
     }));
@@ -120,14 +120,14 @@ pub fn parse(htx: &mut Htx) {
                     }
                 };
                 println!("{status_line:?}");
-                htx.blocks.push(HtxBlock::StatusLine(status_line));
+                htx.blocks.push_back(HtxBlock::StatusLine(status_line));
                 htx.parsing_phase = HtxParsingPhase::Headers;
                 i
             }
             HtxParsingPhase::Headers => match parse_header(buf, unparsed_buf) {
                 Ok((i, header)) => {
                     println!("{header:?}");
-                    htx.blocks.push(HtxBlock::Header(header));
+                    htx.blocks.push_back(HtxBlock::Header(header));
                     i
                 }
                 Err(NomError::Incomplete(_)) => {
@@ -148,12 +148,12 @@ pub fn parse(htx: &mut Htx) {
                 let len = unparsed_buf.len();
                 let taken = min(len, htx.expects);
                 htx.expects -= taken;
-                htx.blocks.push(HtxBlock::Chunk(Chunk {
+                htx.blocks.push_back(HtxBlock::Chunk(Chunk {
                     data: Store::new_slice(buf, &unparsed_buf[..taken]),
                 }));
                 if htx.expects == 0 {
                     htx.parsing_phase = HtxParsingPhase::Terminated;
-                    htx.blocks.push(HtxBlock::Flags(Flags {
+                    htx.blocks.push_back(HtxBlock::Flags(Flags {
                         end_chunk: false,
                         end_header: false,
                         end_stream: true,
@@ -177,7 +177,7 @@ pub fn parse(htx: &mut Htx) {
                     if size == 0 {
                         htx.parsing_phase = HtxParsingPhase::Trailers;
                     }
-                    htx.blocks.push(HtxBlock::ChunkHeader(ChunkHeader {
+                    htx.blocks.push_back(HtxBlock::ChunkHeader(ChunkHeader {
                         length: Store::new_slice(buf, size_hexa),
                     }));
                     i
@@ -185,11 +185,11 @@ pub fn parse(htx: &mut Htx) {
                     let len = unparsed_buf.len();
                     let taken = min(len, htx.expects);
                     htx.expects -= taken;
-                    htx.blocks.push(HtxBlock::Chunk(Chunk {
+                    htx.blocks.push_back(HtxBlock::Chunk(Chunk {
                         data: Store::new_slice(buf, &unparsed_buf[..taken]),
                     }));
                     if htx.expects == 0 {
-                        htx.blocks.push(HtxBlock::Flags(Flags {
+                        htx.blocks.push_back(HtxBlock::Flags(Flags {
                             end_chunk: true,
                             end_header: false,
                             end_stream: false,
@@ -201,7 +201,7 @@ pub fn parse(htx: &mut Htx) {
             HtxParsingPhase::Trailers => match parse_header(buf, unparsed_buf) {
                 Ok((i, header)) => {
                     println!("{header:?}");
-                    htx.blocks.push(HtxBlock::Header(header));
+                    htx.blocks.push_back(HtxBlock::Header(header));
                     i
                 }
                 Err(NomError::Incomplete(_)) => {
@@ -210,7 +210,7 @@ pub fn parse(htx: &mut Htx) {
                 Err(_) => match crlf(unparsed_buf) {
                     Ok((i, _)) => {
                         htx.parsing_phase = HtxParsingPhase::Terminated;
-                        htx.blocks.push(HtxBlock::Flags(Flags {
+                        htx.blocks.push_back(HtxBlock::Flags(Flags {
                             end_chunk: false,
                             end_header: true,
                             end_stream: true,
@@ -240,7 +240,7 @@ pub fn parse(htx: &mut Htx) {
                     HtxParsingPhase::Body
                 }
             };
-            htx.blocks.push(HtxBlock::Flags(Flags {
+            htx.blocks.push_back(HtxBlock::Flags(Flags {
                 end_chunk: false,
                 end_header: true,
                 end_stream: htx.terminated(),

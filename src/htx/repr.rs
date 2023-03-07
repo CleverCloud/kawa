@@ -1,13 +1,13 @@
-use std::io::IoSlice;
+use std::{collections::VecDeque, io::IoSlice};
 
-use crate::htx::HtxBuffer;
+use crate::htx::{HtxBlockConverter, HtxBuffer};
 
 /// Intermediate representation for both H1 and H2 protocols
 pub struct Htx<'a> {
     pub kind: HtxKind,
     pub storage: HtxBuffer<'a>,
-    pub blocks: Vec<HtxBlock>,
-    pub out: Vec<Store>,
+    pub blocks: VecDeque<HtxBlock>,
+    pub out: VecDeque<Store>,
     pub expects: usize,
     pub parsing_phase: HtxParsingPhase,
     pub body_size: HtxBodySize,
@@ -17,8 +17,8 @@ impl<'a> Htx<'a> {
     pub fn new(kind: HtxKind, storage: HtxBuffer<'a>) -> Self {
         Self {
             kind,
-            blocks: Vec::new(),
-            out: Vec::new(),
+            blocks: VecDeque::new(),
+            out: VecDeque::new(),
             expects: 0,
             parsing_phase: HtxParsingPhase::StatusLine,
             body_size: HtxBodySize::Empty,
@@ -35,10 +35,12 @@ impl<'a> Htx<'a> {
         }
     }
 
-    pub fn prepare(&mut self, converter: impl Fn(&HtxBodySize, HtxBlock, &mut Vec<Store>)) {
-        self.blocks
-            .drain(..)
-            .for_each(|block| converter(&self.body_size, block, &mut self.out));
+    pub fn prepare(&mut self, converter: &mut impl HtxBlockConverter) {
+        converter.initialize(self);
+        while let Some(block) = self.blocks.pop_front() {
+            converter.call(block, self);
+        }
+        converter.finalize(self);
     }
 
     pub fn as_io_slice(&mut self) -> Vec<IoSlice> {
@@ -49,20 +51,15 @@ impl<'a> Htx<'a> {
     }
 
     pub fn consume(&mut self, mut amount: usize) {
-        let mut stores_left = Vec::new();
-        let mut iter = self.out.drain(..);
-        for store in iter.by_ref() {
+        while let Some(store) = self.out.pop_front() {
             let (remaining, store) = store.consume(amount);
             amount = remaining;
             if let Some(store) = store {
-                stores_left.push(store);
+                self.out.push_front(store);
                 break;
             }
         }
         assert!(amount == 0);
-
-        stores_left.extend(iter);
-        self.out = stores_left;
 
         let can_consume = self.leftmost_ref() - self.storage.start;
         self.storage.consume(can_consume);
