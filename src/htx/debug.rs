@@ -45,7 +45,10 @@ impl Htx<'_> {
         let block_pad = format!("{pad}    ");
         for (i, block) in self.out.iter().enumerate() {
             result.write_fmt(format_args!("\n{block_pad}"))?;
-            block.debug(buf, &block_pad, &mut result)?;
+            match block {
+                super::repr::OutBlock::Delimiter => result.write_fmt(format_args!("DELIMITER"))?,
+                super::repr::OutBlock::Store(store) => store.debug(buf, &block_pad, &mut result)?,
+            }
             if i == self.out.len() - 1 {
                 result.write_fmt(format_args!(",\n{pad}  "))?;
             } else {

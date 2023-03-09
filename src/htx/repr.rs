@@ -7,7 +7,7 @@ pub struct Htx<'a> {
     pub kind: HtxKind,
     pub storage: HtxBuffer<'a>,
     pub blocks: VecDeque<HtxBlock>,
-    pub out: VecDeque<Store>,
+    pub out: VecDeque<OutBlock>,
     pub expects: usize,
     pub parsing_phase: HtxParsingPhase,
     pub body_size: HtxBodySize,
@@ -46,7 +46,16 @@ impl<'a> Htx<'a> {
     pub fn as_io_slice(&mut self) -> Vec<IoSlice> {
         self.out
             .iter()
-            .map(|store| IoSlice::new(store.data(self.storage.buffer).expect("DATA")))
+            .take_while(|block| match block {
+                OutBlock::Delimiter => false,
+                OutBlock::Store(_) => true,
+            })
+            .map(|block| match block {
+                OutBlock::Delimiter => unreachable!(), // due to previous take_while
+                OutBlock::Store(store) => {
+                    IoSlice::new(store.data(self.storage.buffer).expect("DATA"))
+                }
+            })
             .collect()
     }
 
@@ -55,7 +64,7 @@ impl<'a> Htx<'a> {
             let (remaining, store) = store.consume(amount);
             amount = remaining;
             if let Some(store) = store {
-                self.out.push_front(store);
+                self.out.push_front(OutBlock::Store(store));
                 break;
             }
         }
@@ -72,11 +81,22 @@ impl<'a> Htx<'a> {
 
     pub fn leftmost_ref(&self) -> usize {
         for store in &self.out {
-            if let Store::Slice(slice) = store {
+            if let OutBlock::Store(Store::Slice(slice)) = store {
                 return slice.start as usize;
             }
         }
         self.storage.head
+    }
+
+    #[allow(dead_code)]
+    pub fn push_block(&mut self, block: HtxBlock) {
+        self.blocks.push_back(block)
+    }
+    pub fn push_out(&mut self, store: Store) {
+        self.out.push_back(OutBlock::Store(store))
+    }
+    pub fn push_delimiter(&mut self) {
+        self.out.push_back(OutBlock::Delimiter)
     }
 
     pub fn terminated(&self) -> bool {
@@ -193,6 +213,28 @@ pub struct Flags {
     pub end_chunk: bool,
     pub end_header: bool,
     pub end_stream: bool,
+}
+
+#[derive(Debug)]
+pub enum OutBlock {
+    Delimiter,
+    Store(Store),
+}
+
+impl OutBlock {
+    pub fn push_left(&mut self, amount: u32) {
+        match self {
+            OutBlock::Store(store) => store.push_left(amount),
+            OutBlock::Delimiter => {}
+        }
+    }
+
+    pub fn consume(self, amount: usize) -> (usize, Option<Store>) {
+        match self {
+            OutBlock::Store(store) => store.consume(amount),
+            OutBlock::Delimiter => (amount, None),
+        }
+    }
 }
 
 #[derive(Debug)]

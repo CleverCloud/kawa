@@ -15,7 +15,6 @@ impl Version {
 
 impl HtxBlockConverter for BlockConverter {
     fn call(&mut self, block: HtxBlock, htx: &mut Htx) {
-        let out = &mut htx.out;
         match block {
             HtxBlock::StatusLine(StatusLine::Request {
                 version,
@@ -24,14 +23,14 @@ impl HtxBlockConverter for BlockConverter {
                 authority,
                 ..
             }) => {
-                out.push_back(method);
-                out.push_back(Store::Static(b" "));
-                out.push_back(uri);
-                out.push_back(Store::Static(b" "));
-                out.push_back(version.as_store());
-                out.push_back(Store::Static(b"\r\nHost: "));
-                out.push_back(authority);
-                out.push_back(Store::Static(b"\r\n"));
+                htx.push_out(method);
+                htx.push_out(Store::Static(b" "));
+                htx.push_out(uri);
+                htx.push_out(Store::Static(b" "));
+                htx.push_out(version.as_store());
+                htx.push_out(Store::Static(b"\r\nHost: "));
+                htx.push_out(authority);
+                htx.push_out(Store::Static(b"\r\n"));
             }
             HtxBlock::StatusLine(StatusLine::Response {
                 version,
@@ -39,12 +38,12 @@ impl HtxBlockConverter for BlockConverter {
                 reason,
                 ..
             }) => {
-                out.push_back(version.as_store());
-                out.push_back(Store::Static(b" "));
-                out.push_back(status);
-                out.push_back(Store::Static(b" "));
-                out.push_back(reason);
-                out.push_back(Store::Static(b"\r\n"));
+                htx.push_out(version.as_store());
+                htx.push_out(Store::Static(b" "));
+                htx.push_out(status);
+                htx.push_out(Store::Static(b" "));
+                htx.push_out(reason);
+                htx.push_out(Store::Static(b"\r\n"));
             }
             HtxBlock::Header(Header {
                 key: Store::Empty, ..
@@ -52,17 +51,17 @@ impl HtxBlockConverter for BlockConverter {
                 // elided header
             }
             HtxBlock::Header(Header { key, val }) => {
-                out.push_back(key);
-                out.push_back(Store::Static(b": "));
-                out.push_back(val);
-                out.push_back(Store::Static(b"\r\n"));
+                htx.push_out(key);
+                htx.push_out(Store::Static(b": "));
+                htx.push_out(val);
+                htx.push_out(Store::Static(b"\r\n"));
             }
             HtxBlock::ChunkHeader(ChunkHeader { length }) => {
-                out.push_back(length);
-                out.push_back(Store::Static(b"\r\n"));
+                htx.push_out(length);
+                htx.push_out(Store::Static(b"\r\n"));
             }
             HtxBlock::Chunk(Chunk { data }) => {
-                out.push_back(data);
+                htx.push_out(data);
             }
             HtxBlock::Flags(Flags {
                 end_header,
@@ -70,7 +69,7 @@ impl HtxBlockConverter for BlockConverter {
                 ..
             }) => {
                 if end_header || end_chunk {
-                    out.push_back(Store::Static(b"\r\n"));
+                    htx.push_out(Store::Static(b"\r\n"));
                 }
             }
         }
