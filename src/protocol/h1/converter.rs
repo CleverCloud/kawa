@@ -64,10 +64,14 @@ impl HtxBlockConverter for BlockConverter {
                 htx.push_out(data);
             }
             HtxBlock::Flags(Flags {
-                end_header,
+                end_body,
                 end_chunk,
+                end_header,
                 ..
             }) => {
+                if htx.is_streaming() && end_body {
+                    htx.push_out(Store::Static(b"0\r\n"));
+                }
                 if end_header || end_chunk {
                     htx.push_out(Store::Static(b"\r\n"));
                 }

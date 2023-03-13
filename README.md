@@ -41,7 +41,7 @@ htx_blocks: [
     ChunkHeader(Slice("5")),
     Chunk(Slice("pedia")),
     Flags(END_CHUNK),
-    ChunkHeader(Slice("0")),
+    Flags(END_BODY),
     Header(Slice("Foo"), Slice("bar")),
     Flags(END_HEADER | END_STREAM),
 ]
@@ -89,7 +89,7 @@ HTTP/1.1 [200] [OK]
 [Wiki]
 [5]
 [pedia]
-[0]
+0
 [Foo]: [bar]
 
 ```
@@ -133,7 +133,7 @@ htx_blocks: [
     ChunkHeader(Slice("5")),
     Chunk(Slice("pedia")),
     Flags(END_CHUNK),
-    ChunkHeader(Slice("0")),
+    Flags(END_BODY),
     // "bazz" is longer than "bar" so it was dynamically allocated, this may change in the future
     Header(Slice("Foo"), Vec("bazz"))
     Flags(END_HEADER | END_STREAM),
@@ -153,7 +153,7 @@ User-Agent: curl/7.43.0        // no references to this line
 [Wiki]
 [5]
 [pedia]
-[0]
+0
 [Foo]: bar                     // no reference to "bar"
 
 ```
@@ -215,9 +215,8 @@ out: [
     // Flags(END_CHUNK)
     Static("\r\n")
 
-    // ChunkHeader
-    Slice("0")
-    Static("\r\n")
+    // Flags(END_BODY),
+    Static("0\r\n")
 
     // Header
     Slice("Foo"),
@@ -266,8 +265,7 @@ out: [
     Static("\r\n"),
     Slice("pedia"),
     Static("\r\n"),
-    Slice("0"),
-    Static("\r\n"),
+    Static("0\r\n"),
     Slice("Foo"),
     Static(": "),
     Vec("bazz"),
@@ -289,7 +287,7 @@ Trailer: Foo
 Wi[ki]
 [5]
 [pedia]
-[0]
+0
 [Foo]: bar
 
 ```
@@ -323,8 +321,7 @@ out: [
     Static("\r\n"),
     Slice("pedia"), // references...
     Static("\r\n"),
-    Slice("0"),
-    Static("\r\n"),
+    Static("0\r\n"),
     Slice("Foo"),
     Static(": "),
     Vec("bazz"),
@@ -344,8 +341,7 @@ out: [
     Static("\r\n"),
     Slice("pedia"), // references...
     Static("\r\n"),
-    Slice("0"),
-    Static("\r\n"),
+    Static("0\r\n"),
     Slice("Foo"),
     Static(": "),
     Vec("bazz"),
@@ -358,7 +354,7 @@ out: [
 [ki]
 [5]
 [pedia]
-[0]
+0
 [Foo]: bar
 
 ```

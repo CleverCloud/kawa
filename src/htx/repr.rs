@@ -99,12 +99,16 @@ impl<'a> Htx<'a> {
         self.out.push_back(OutBlock::Delimiter)
     }
 
-    pub fn terminated(&self) -> bool {
+    pub fn is_terminated(&self) -> bool {
         self.parsing_phase == HtxParsingPhase::Terminated
     }
 
-    pub fn in_error(&self) -> bool {
+    pub fn is_error(&self) -> bool {
         self.parsing_phase == HtxParsingPhase::Error
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        matches!(self.body_size, HtxBodySize::Chunked)
     }
 }
 
@@ -210,6 +214,7 @@ pub struct Chunk {
 
 #[derive(Debug)]
 pub struct Flags {
+    pub end_body: bool,
     pub end_chunk: bool,
     pub end_header: bool,
     pub end_stream: bool,

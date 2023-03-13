@@ -140,12 +140,18 @@ impl Chunk {
 }
 
 impl Flags {
-    pub fn debug(&self, _: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
-        result.write_fmt(format_args!("Flags {{"))?;
-        result.write_fmt(format_args!("\n{pad}  end_chunk: {}", self.end_chunk))?;
-        result.write_fmt(format_args!(",\n{pad}  end_header: {}", self.end_header))?;
-        result.write_fmt(format_args!(",\n{pad}  end_stream: {}", self.end_stream))?;
-        result.write_fmt(format_args!(",\n{pad}}}"))?;
+    pub fn debug(&self, _: &[u8], _: &str, result: &mut String) -> Result<(), std::fmt::Error> {
+        let flags = [
+            (self.end_body, "BODY"),
+            (self.end_chunk, "CHUNK"),
+            (self.end_header, "HEADER"),
+            (self.end_stream, "STREAM"),
+        ]
+        .into_iter()
+        .filter_map(|(flag, name)| if flag { Some(name) } else { None })
+        .collect::<Vec<_>>()
+        .join("|");
+        result.write_fmt(format_args!("Flags ({})", flags))?;
         Ok(())
     }
 }

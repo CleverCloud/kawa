@@ -45,6 +45,7 @@ impl HtxBlockConverter for BlockConverter {
                 htx.push_out(Store::Static(b"------------ DATA\n"));
                 htx.push_out(data);
                 htx.push_out(Store::Static(b"\n"));
+                htx.push_delimiter()
             }
             HtxBlock::Flags(Flags {
                 end_header,
@@ -57,7 +58,9 @@ impl HtxBlockConverter for BlockConverter {
                 if end_stream {
                     htx.push_out(Store::Static(b"------------ END STREAM\n"));
                 }
-                htx.push_delimiter()
+                if end_header || end_stream {
+                    htx.push_delimiter()
+                }
             }
         }
     }

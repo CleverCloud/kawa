@@ -154,6 +154,7 @@ pub fn parse(htx: &mut Htx) {
                 if htx.expects == 0 {
                     htx.parsing_phase = HtxParsingPhase::Terminated;
                     htx.blocks.push_back(HtxBlock::Flags(Flags {
+                        end_body: true,
                         end_chunk: false,
                         end_header: false,
                         end_stream: true,
@@ -175,11 +176,18 @@ pub fn parse(htx: &mut Htx) {
                     };
                     htx.expects = size;
                     if size == 0 {
+                        htx.blocks.push_back(HtxBlock::Flags(Flags {
+                            end_body: true,
+                            end_chunk: false,
+                            end_header: false,
+                            end_stream: false,
+                        }));
                         htx.parsing_phase = HtxParsingPhase::Trailers;
+                    } else {
+                        htx.blocks.push_back(HtxBlock::ChunkHeader(ChunkHeader {
+                            length: Store::new_slice(buf, size_hexa),
+                        }));
                     }
-                    htx.blocks.push_back(HtxBlock::ChunkHeader(ChunkHeader {
-                        length: Store::new_slice(buf, size_hexa),
-                    }));
                     i
                 } else {
                     let len = unparsed_buf.len();
@@ -190,6 +198,7 @@ pub fn parse(htx: &mut Htx) {
                     }));
                     if htx.expects == 0 {
                         htx.blocks.push_back(HtxBlock::Flags(Flags {
+                            end_body: false,
                             end_chunk: true,
                             end_header: false,
                             end_stream: false,
@@ -211,6 +220,7 @@ pub fn parse(htx: &mut Htx) {
                     Ok((i, _)) => {
                         htx.parsing_phase = HtxParsingPhase::Terminated;
                         htx.blocks.push_back(HtxBlock::Flags(Flags {
+                            end_body: false,
                             end_chunk: false,
                             end_header: true,
                             end_stream: true,
@@ -228,7 +238,7 @@ pub fn parse(htx: &mut Htx) {
         htx.storage.head = htx.storage.buffer.offset(i);
         if need_processing {
             process_headers(htx);
-            if htx.in_error() {
+            if htx.is_error() {
                 return;
             }
             need_processing = false;
@@ -241,9 +251,10 @@ pub fn parse(htx: &mut Htx) {
                 }
             };
             htx.blocks.push_back(HtxBlock::Flags(Flags {
+                end_body: false,
                 end_chunk: false,
                 end_header: true,
-                end_stream: htx.terminated(),
+                end_stream: htx.is_terminated(),
             }));
         }
     }
