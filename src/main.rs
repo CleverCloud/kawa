@@ -105,6 +105,12 @@ fn main() {
     test(
         HtxKind::Request,
         &mut buffer,
+        b"CONNECT www.example.com:80 HTTP/1.1\r\n\r\n",
+    );
+
+    test(
+        HtxKind::Request,
+        &mut buffer,
         b"POST /cgi-bin/process.cgi HTTP/1.1\r
 User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
 Host: www.tutorialspoint.com\r

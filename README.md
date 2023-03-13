@@ -34,10 +34,43 @@ htx_blocks: [
     Header(Slice("Connection"), Slice("Keep-Alive")),
     Header(Slice("User-Agent"), Slice("curl/7.43.0")),
     Header(Slice("Trailer"), Slice("Foo")),
-    Chunk(Slice("4\r\nWiki\r\n5\r\npedia\r\n0\r\n")),
+    Flags(END_HEADER),
+    ChunkHeader(Slice("4")),
+    Chunk(Slice("Wiki")),
+    Flags(END_CHUNK),
+    ChunkHeader(Slice("5")),
+    Chunk(Slice("pedia")),
+    Flags(END_CHUNK),
+    ChunkHeader(Slice("0")),
     Header(Slice("Foo"), Slice("bar")),
+    Flags(END_HEADER | END_STREAM),
 ]
 ```
+
+> note: `ChunkHeader` is the only protocol specific `HtxBlock`. It holds the chunk size present in
+> an HTTP/1.1 chunk header. They can safely be ignored by an HTTP/2 converter. The `Flags` blocks
+> holds context dependant information, allowing converters to be stateless.
+
+Importantly, `Chunk` blocks don't necessarily hold an entire chunk. They may only contain a
+fraction of a bigger chunk. Meaning these two representation are strictly identical:
+```rs
+htx_full_chunk: [
+    ChunkHeader(Slice("4")),
+    Chunk(Slice("Wiki")),
+    Flags(END_CHUNK),
+]
+htx_fragmented_chunk: [
+    ChunkHeader(Slice("4")),
+    Chunk(Slice("Wi")),
+    Chunk(Slice("k")),
+    Chunk(Slice("i")),
+    Flags(END_CHUNK),
+]
+```
+
+> note: this is done in order to advance the parsing head without having to wait for potentially
+> very big chunk to arrive entirely. This scheme allows more efficient streaming and prevent the
+> parsers from soft locking on chunks to big to fit in their buffer.
 
 ## Reference buffer content with Slices
 
@@ -52,11 +85,11 @@ HTTP/1.1 [200] [OK]
 [User-Agent]: [curl/7.43.0]
 [Trailer]: [Foo]
 
-[4
-Wiki
-5
-pedia
-0]
+[4]
+[Wiki]
+[5]
+[pedia]
+[0]
 [Foo]: [bar]
 
 ```
@@ -78,7 +111,7 @@ using the generic HTX representation:
     htx_blocks.remove(3); // remove "User-Agent" header
     htx_blocks.insert(3, Header(Static("Sozu-id"), Vec(sozu_id.as_bytes().to_vec())));
     htx_blocks[2].val.modify("close");
-    htx_blocks[6].val.modify("bazz");
+    htx_blocks[13].val.modify("bazz");
 ```
 
 > note: `modify` should only be used with dynamic values that will be dropped to give then a proper lifetime.
@@ -93,9 +126,17 @@ htx_blocks: [
     Header(Slice("Connection"), Slice("close")),
     Header(Static("Sozu-id"), Vec("SOZUBALANCEID")),
     Header(Slice("Trailer"), Slice("Foo")),
-    Chunk(Slice("4\r\nWiki\r\n5\r\npedia\r\n0\r\n"))
+    Flags(END_HEADER),
+    ChunkHeader(Slice("4")),
+    Chunk(Slice("Wiki")),
+    Flags(END_CHUNK),
+    ChunkHeader(Slice("5")),
+    Chunk(Slice("pedia")),
+    Flags(END_CHUNK),
+    ChunkHeader(Slice("0")),
     // "bazz" is longer than "bar" so it was dynamically allocated, this may change in the future
     Header(Slice("Foo"), Vec("bazz"))
+    Flags(END_HEADER | END_STREAM),
 ]
 ```
 
@@ -108,11 +149,11 @@ HTTP/1.1 [200] [OK]
 User-Agent: curl/7.43.0        // no references to this line
 [Trailer]: [Foo]
 
-[4
-Wiki
-5
-pedia
-0]
+[4]
+[Wiki]
+[5]
+[pedia]
+[0]
 [Foo]: bar                     // no reference to "bar"
 
 ```
@@ -155,10 +196,28 @@ out: [
     Slice("Foo"),
     Static("\r\n"),
 
-    Static("\r\n"), // end of headers
+    // Flags(END_HEADER)
+    Static("\r\n"),
 
+    // ChunkHeader
+    Slice("4")
+    Static("\r\n")
     // Chunk
-    Slice("4\r\nWiki\r\n5\r\npedia\r\n0\r\n"),
+    Slice("Wiki")
+    // Flags(END_CHUNK)
+    Static("\r\n")
+
+    // ChunkHeader
+    Slice("5")
+    Static("\r\n")
+    // Chunk
+    Slice("pedia")
+    // Flags(END_CHUNK)
+    Static("\r\n")
+
+    // ChunkHeader
+    Slice("0")
+    Static("\r\n")
 
     // Header
     Slice("Foo"),
@@ -166,7 +225,8 @@ out: [
     Vec("bazz"),
     Static("\r\n"),
 
-    Static("\r\n"), // end of response
+    // Flags(END_HEADER | END_STREAM)
+    Static("\r\n"),
 ]
 ```
 
@@ -200,7 +260,14 @@ In our case, Walking and discarding the `Stores` from `out` it remains:
 ```rs
 out: [
     // <-- previous Stores were completely written so they were removed
-    Slice("ki\r\n5\r\npedia\r\n0\r\n"), // Slice was partially written and updated accordingly
+    Slice("ki"),    // Slice was partially written and updated accordingly
+    Static("\r\n"),
+    Slice("5"),
+    Static("\r\n"),
+    Slice("pedia"),
+    Static("\r\n"),
+    Slice("0"),
+    Static("\r\n"),
     Slice("Foo"),
     Static(": "),
     Vec("bazz"),
@@ -219,10 +286,10 @@ User-Agent: curl/7.43.0
 Trailer: Foo
 
 4
-Wi[ki
-5
-pedia
-0]
+Wi[ki]
+[5]
+[pedia]
+[0]
 [Foo]: bar
 
 ```
@@ -250,8 +317,15 @@ As a result, the remaining `Store::Slices` in the out vector reference data that
 
 ```rs
 out: [
-    Slice("ki\r\n5\r\npedia\r\n0\r\n"), // references data starting at index 115
-    Slice("Foo"),                       // references data starting at index 132
+    Slice("ki"),    // references data starting at index 115
+    Static("\r\n"),
+    Slice("5"),     // references data starting at index 119
+    Static("\r\n"),
+    Slice("pedia"), // references...
+    Static("\r\n"),
+    Slice("0"),
+    Static("\r\n"),
+    Slice("Foo"),
     Static(": "),
     Vec("bazz"),
     Static("\r\n"),
@@ -264,8 +338,15 @@ amount of bytes discarded to realigned the data:
 
 ```rs
 out: [
-    Slice("ki\r\n5\r\npedia\r\n0\r\n"), // references data starting at index 0
-    Slice("Foo"),                       // references data starting at index 17
+    Slice("ki"),    // references data starting at index 0
+    Static("\r\n"),
+    Slice("5"),     // references data starting at index 4
+    Static("\r\n"),
+    Slice("pedia"), // references...
+    Static("\r\n"),
+    Slice("0"),
+    Static("\r\n"),
+    Slice("Foo"),
     Static(": "),
     Vec("bazz"),
     Static("\r\n"),
@@ -274,10 +355,10 @@ out: [
 ```
 
 ```txt
-[ki
-5
-pedia
-0]
+[ki]
+[5]
+[pedia]
+[0]
 [Foo]: bar
 
 ```

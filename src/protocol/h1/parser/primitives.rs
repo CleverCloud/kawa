@@ -228,10 +228,10 @@ fn parse_asterisk_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Sto
     }
 }
 /// ```txt
-/// www.example.org:8001 -> ("www.example.org:8001", Empty)
+/// www.example.org:8001 -> ("www.example.org:8001", "/")
 /// ```
 fn parse_authority_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
-    Ok((&[], (Store::new_slice(buffer, i), Store::Empty)))
+    Ok((&[], (Store::new_slice(buffer, i), Store::Static(b"/"))))
 }
 /// ```txt
 /// /index.html?k=v#h -> (Empty, "/index.html?k=v#h")
@@ -240,7 +240,7 @@ fn parse_origin_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store
     Ok((&[], (Store::Empty, Store::new_slice(buffer, i))))
 }
 /// ```txt
-/// http://www.example.org:8001                            -> ("www.example.org:8001", Empty)
+/// http://www.example.org:8001                            -> ("www.example.org:8001", "/")
 /// http://www.example.org:8001?k=v#h                      -> ("www.example.org:8001", "?k=v#h")
 /// http://www.example.org:8001/index.html?k=v#h           -> ("www.example.org:8001", "/index.html?k=v#h")
 /// http://user:pass@www.example.org:8001/index.html?k=v#h -> ("www.example.org:8001", "/index.html?k=v#h")
@@ -252,13 +252,13 @@ fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Sto
         opt(userinfo),
         take_while(is_authority_char),
     ))(i)?;
-    Ok((
-        &[],
-        (
-            Store::new_slice(buffer, authority),
-            Store::new_slice(buffer, path),
-        ),
-    ))
+    let authority = Store::new_slice(buffer, authority);
+    let path = if path.is_empty() {
+        Store::Static(b"/")
+    } else {
+        Store::new_slice(buffer, path)
+    };
+    Ok((&[], (authority, path)))
 }
 
 pub fn parse_url<'a>(method: &[u8], buffer: &[u8], i: &'a [u8]) -> Option<(Store, Store)> {
