@@ -1,4 +1,4 @@
-use crate::htx::{
+use crate::storage::{
     Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store, Version,
 };
 

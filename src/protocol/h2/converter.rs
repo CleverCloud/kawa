@@ -1,4 +1,7 @@
-use crate::htx::{Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store};
+use crate::{
+    protocol::utils::compare_no_case,
+    storage::{Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store},
+};
 
 pub struct BlockConverter;
 
@@ -32,6 +35,22 @@ impl HtxBlockConverter for BlockConverter {
                 // elided header
             }
             HtxBlock::Header(Header { key, val }) => {
+                {
+                    let key = key.data(&htx.storage.buffer);
+                    let val = val.data(&htx.storage.buffer);
+                    if compare_no_case(key, b"connection")
+                        || compare_no_case(key, b"host")
+                        || compare_no_case(key, b"http2-settings")
+                        || compare_no_case(key, b"keep-alive")
+                        || compare_no_case(key, b"proxy-connection")
+                        || compare_no_case(key, b"te") && !compare_no_case(val, b"trailers")
+                        || compare_no_case(key, b"trailer")
+                        || compare_no_case(key, b"transfer-encoding")
+                        || compare_no_case(key, b"upgrade")
+                    {
+                        return;
+                    }
+                }
                 htx.push_out(Store::Static(b"------------ HEADER\n"));
                 htx.push_out(key);
                 htx.push_out(Store::Static(b": "));

@@ -1,27 +1,27 @@
 use std::{collections::VecDeque, io::IoSlice};
 
-use crate::htx::{HtxBlockConverter, HtxBuffer};
+use crate::storage::{HtxBlockConverter, HtxBuffer};
 
 /// Intermediate representation for both H1 and H2 protocols
 pub struct Htx<'a> {
-    pub kind: HtxKind,
+    pub kind: Kind,
     pub storage: HtxBuffer<'a>,
     pub blocks: VecDeque<HtxBlock>,
     pub out: VecDeque<OutBlock>,
     pub expects: usize,
-    pub parsing_phase: HtxParsingPhase,
-    pub body_size: HtxBodySize,
+    pub parsing_phase: ParsingPhase,
+    pub body_size: BodySize,
 }
 
 impl<'a> Htx<'a> {
-    pub fn new(kind: HtxKind, storage: HtxBuffer<'a>) -> Self {
+    pub fn new(kind: Kind, storage: HtxBuffer<'a>) -> Self {
         Self {
             kind,
             blocks: VecDeque::new(),
             out: VecDeque::new(),
             expects: 0,
-            parsing_phase: HtxParsingPhase::StatusLine,
-            body_size: HtxBodySize::Empty,
+            parsing_phase: ParsingPhase::StatusLine,
+            body_size: BodySize::Empty,
             storage,
         }
     }
@@ -52,9 +52,7 @@ impl<'a> Htx<'a> {
             })
             .map(|block| match block {
                 OutBlock::Delimiter => unreachable!(), // due to previous take_while
-                OutBlock::Store(store) => {
-                    IoSlice::new(store.data(self.storage.buffer).expect("DATA"))
-                }
+                OutBlock::Store(store) => IoSlice::new(store.data(self.storage.buffer)),
             })
             .collect()
     }
@@ -100,26 +98,26 @@ impl<'a> Htx<'a> {
     }
 
     pub fn is_terminated(&self) -> bool {
-        self.parsing_phase == HtxParsingPhase::Terminated
+        self.parsing_phase == ParsingPhase::Terminated
     }
 
     pub fn is_error(&self) -> bool {
-        self.parsing_phase == HtxParsingPhase::Error
+        self.parsing_phase == ParsingPhase::Error
     }
 
     pub fn is_streaming(&self) -> bool {
-        matches!(self.body_size, HtxBodySize::Chunked)
+        matches!(self.body_size, BodySize::Chunked)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum HtxKind {
+pub enum Kind {
     Request,
     Response,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HtxParsingPhase {
+pub enum ParsingPhase {
     StatusLine,
     Headers,
     Body,
@@ -130,7 +128,7 @@ pub enum HtxParsingPhase {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum HtxBodySize {
+pub enum BodySize {
     Empty,
     Chunked,
     Length(usize),
@@ -273,12 +271,12 @@ impl Store {
         }
     }
 
-    pub fn data<'a>(&'a self, buf: &'a [u8]) -> Option<&'a [u8]> {
+    pub fn data<'a>(&'a self, buf: &'a [u8]) -> &'a [u8] {
         match self {
-            Store::Empty => None,
-            Store::Slice(slice) | Store::Deported(slice) => slice.data(buf),
-            Store::Static(data) => Some(data),
-            Store::Vec(data, index) => Some(&data[*index as usize..]),
+            Store::Empty => unreachable!(),
+            Store::Slice(slice) | Store::Deported(slice) => slice.data(buf).expect("DATA"),
+            Store::Static(data) => data,
+            Store::Vec(data, index) => &data[*index as usize..],
         }
     }
 

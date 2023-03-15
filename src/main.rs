@@ -1,13 +1,13 @@
 use std::io::Write;
 
-mod htx;
 mod protocol;
+mod storage;
 
-use htx::{debug_htx, Htx, HtxBlockConverter, HtxBuffer, HtxKind};
 use protocol::{h1, h2};
+use storage::{debug_htx, Htx, HtxBlockConverter, HtxBuffer, Kind};
 
 fn test_with_converter(
-    htx_kind: HtxKind,
+    htx_kind: Kind,
     storage: HtxBuffer,
     fragment: &[u8],
     converter: &mut impl HtxBlockConverter,
@@ -36,7 +36,7 @@ fn test_with_converter(
     println!("{amount}");
     debug_htx(&htx);
 }
-fn test(htx_kind: HtxKind, storage: &mut [u8], fragment: &[u8]) {
+fn test(htx_kind: Kind, storage: &mut [u8], fragment: &[u8]) {
     test_with_converter(
         htx_kind,
         HtxBuffer::new(storage),
@@ -52,7 +52,7 @@ fn test(htx_kind: HtxKind, storage: &mut [u8], fragment: &[u8]) {
 }
 
 fn test_partial_with_converter(
-    htx_kind: HtxKind,
+    htx_kind: Kind,
     storage: HtxBuffer,
     mut fragments: Vec<&[u8]>,
     converter: &mut impl HtxBlockConverter,
@@ -85,7 +85,7 @@ fn test_partial_with_converter(
     }
     debug_htx(&htx);
 }
-fn test_partial(htx_kind: HtxKind, storage: &mut [u8], fragments: Vec<&[u8]>) {
+fn test_partial(htx_kind: Kind, storage: &mut [u8], fragments: Vec<&[u8]>) {
     test_partial_with_converter(
         htx_kind,
         HtxBuffer::new(storage),
@@ -103,13 +103,13 @@ fn test_partial(htx_kind: HtxKind, storage: &mut [u8], fragments: Vec<&[u8]>) {
 fn main() {
     let mut buffer = vec![0; 512];
     test(
-        HtxKind::Request,
+        Kind::Request,
         &mut buffer,
-        b"CONNECT www.example.com:80 HTTP/1.1\r\n\r\n",
+        b"CONNECT www.example.com:80 HTTP/1.1\r\nTE: lol\r\nTE: trailers\r\n\r\n",
     );
 
     test(
-        HtxKind::Request,
+        Kind::Request,
         &mut buffer,
         b"POST /cgi-bin/process.cgi HTTP/1.1\r
 User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
@@ -124,7 +124,7 @@ licenseID=string&content=string&/paramsXML=string",
     );
 
     test(
-        HtxKind::Response,
+        Kind::Response,
         &mut buffer[..128],
         b"HTTP/1.1 200 OK\r
 Transfer-Encoding: chunked\r
@@ -142,7 +142,7 @@ Foo: bar\r
     );
 
     test_partial(
-        HtxKind::Response,
+        Kind::Response,
         &mut buffer[..128],
         vec![
             b"HTTP/1.1 200 OK\r

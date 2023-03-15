@@ -1,6 +1,8 @@
 use std::fmt::Write;
 
-use crate::htx::{Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBuffer, StatusLine, Store};
+use crate::storage::{
+    Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBuffer, StatusLine, Store,
+};
 
 fn to_utf8(buf: Option<&[u8]>) -> &str {
     match buf {
