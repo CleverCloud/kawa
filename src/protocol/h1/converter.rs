@@ -1,5 +1,6 @@
 use crate::storage::{
-    Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store, Version,
+    AsBuffer, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine,
+    Store, Version,
 };
 
 pub struct BlockConverter;
@@ -13,8 +14,8 @@ impl Version {
     }
 }
 
-impl HtxBlockConverter for BlockConverter {
-    fn call(&mut self, block: HtxBlock, htx: &mut Htx) {
+impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
+    fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
         match block {
             HtxBlock::StatusLine(StatusLine::Request {
                 version,

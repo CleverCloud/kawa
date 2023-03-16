@@ -5,26 +5,30 @@ use nom::{Err as NomError, Offset, ParseTo};
 
 mod primitives;
 
-use crate::protocol::{
-    h1::parser::primitives::{
-        crlf, parse_chunk_header, parse_header, parse_request_line, parse_response_line, parse_url,
+use crate::{
+    protocol::{
+        h1::parser::primitives::{
+            crlf, parse_chunk_header, parse_header, parse_request_line, parse_response_line,
+            parse_url,
+        },
+        utils::compare_no_case,
     },
-    utils::compare_no_case,
-};
-use crate::storage::{
-    BodySize, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, Kind, ParsingPhase, StatusLine,
-    Store,
+    storage::AsBuffer,
+    storage::{
+        BodySize, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, Kind, ParsingPhase, StatusLine,
+        Store,
+    },
 };
 
-fn handle_error<E>(htx: &Htx, error: NomError<E>) -> ParsingPhase {
+fn handle_error<T: AsBuffer, E>(htx: &Htx<T>, error: NomError<E>) -> ParsingPhase {
     match error {
         NomError::Error(_) | NomError::Failure(_) => ParsingPhase::Error,
         NomError::Incomplete(_) => htx.parsing_phase,
     }
 }
 
-fn process_headers(htx: &mut Htx) {
-    let buf = &mut htx.storage.buffer;
+fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
+    let buf = &mut htx.storage.mut_buffer();
 
     let (mut authority, path) = match htx.blocks.get_mut(0) {
         Some(HtxBlock::StatusLine(StatusLine::Request { uri, method, .. })) => {
@@ -96,7 +100,7 @@ fn process_headers(htx: &mut Htx) {
     }));
 }
 
-pub fn parse(htx: &mut Htx) {
+pub fn parse<T: AsBuffer>(htx: &mut Htx<T>) {
     let mut need_processing = false;
     loop {
         let unparsed_buf = htx.storage.unparsed_data();
@@ -233,7 +237,7 @@ pub fn parse(htx: &mut Htx) {
             },
             ParsingPhase::Terminated | ParsingPhase::Error => break,
         };
-        htx.storage.head = htx.storage.buffer.offset(i);
+        htx.storage.head = htx.storage.buffer().offset(i);
         if need_processing {
             process_headers(htx);
             if htx.is_error() {

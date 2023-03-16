@@ -1,12 +1,14 @@
 use crate::{
     protocol::utils::compare_no_case,
-    storage::{Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store},
+    storage::{
+        AsBuffer, Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store,
+    },
 };
 
 pub struct BlockConverter;
 
-impl HtxBlockConverter for BlockConverter {
-    fn call(&mut self, block: HtxBlock, htx: &mut Htx) {
+impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
+    fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
         match block {
             HtxBlock::StatusLine(StatusLine::Request {
                 method,
@@ -36,8 +38,8 @@ impl HtxBlockConverter for BlockConverter {
             }
             HtxBlock::Header(Header { key, val }) => {
                 {
-                    let key = key.data(&htx.storage.buffer);
-                    let val = val.data(&htx.storage.buffer);
+                    let key = key.data(htx.storage.buffer());
+                    let val = val.data(htx.storage.buffer());
                     if compare_no_case(key, b"connection")
                         || compare_no_case(key, b"host")
                         || compare_no_case(key, b"http2-settings")
