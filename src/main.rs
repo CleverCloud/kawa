@@ -4,14 +4,23 @@ mod protocol;
 mod storage;
 
 use protocol::{h1, h2};
-use storage::{debug_htx, Htx, HtxBlockConverter, HtxBuffer, Kind};
+use storage::{debug_htx, AsBuffer, Htx, HtxBlockConverter, HtxBuffer, Kind};
 
-fn test_with_converter(
+impl AsBuffer for &mut [u8] {
+    fn as_buffer(&self) -> &[u8] {
+        self
+    }
+    fn as_mut_buffer(&mut self) -> &mut [u8] {
+        self
+    }
+}
+
+fn test_with_converter<T: AsBuffer, C: HtxBlockConverter<T>>(
     htx_kind: Kind,
-    storage: HtxBuffer,
+    storage: HtxBuffer<T>,
     fragment: &[u8],
-    converter: &mut impl HtxBlockConverter,
-) {
+    converter: &mut C,
+) -> T {
     let mut htx = Htx::new(htx_kind, storage);
     let _ = htx.storage.write(fragment).expect("WRITE");
     debug_htx(&htx);
@@ -35,28 +44,22 @@ fn test_with_converter(
     htx.consume(amount);
     println!("{amount}");
     debug_htx(&htx);
+    htx.storage.buffer
 }
-fn test(htx_kind: Kind, storage: &mut [u8], fragment: &[u8]) {
-    test_with_converter(
-        htx_kind,
-        HtxBuffer::new(storage),
-        fragment,
-        &mut h1::BlockConverter,
-    );
-    test_with_converter(
-        htx_kind,
-        HtxBuffer::new(storage),
-        fragment,
-        &mut h2::BlockConverter,
-    );
+fn test<T: AsBuffer>(htx_kind: Kind, storage: T, fragment: &[u8]) -> T {
+    let htx_buffer = HtxBuffer::new(storage);
+    let storage = test_with_converter(htx_kind, htx_buffer, fragment, &mut h1::BlockConverter);
+    let htx_buffer = HtxBuffer::new(storage);
+    let storage = test_with_converter(htx_kind, htx_buffer, fragment, &mut h2::BlockConverter);
+    storage
 }
 
-fn test_partial_with_converter(
+fn test_partial_with_converter<T: AsBuffer, C: HtxBlockConverter<T>>(
     htx_kind: Kind,
-    storage: HtxBuffer,
+    storage: HtxBuffer<T>,
     mut fragments: Vec<&[u8]>,
-    converter: &mut impl HtxBlockConverter,
-) {
+    converter: &mut C,
+) -> T {
     let mut writer = std::io::BufWriter::new(Vec::new());
     let mut htx = Htx::new(htx_kind, storage);
 
@@ -84,33 +87,35 @@ fn test_partial_with_converter(
         println!("===============================\n{result}\n===============================");
     }
     debug_htx(&htx);
+    htx.storage.buffer
 }
-fn test_partial(htx_kind: Kind, storage: &mut [u8], fragments: Vec<&[u8]>) {
-    test_partial_with_converter(
+fn test_partial<T: AsBuffer>(htx_kind: Kind, storage: T, fragments: Vec<&[u8]>) -> T {
+    let storage = test_partial_with_converter(
         htx_kind,
         HtxBuffer::new(storage),
         fragments.clone(),
         &mut h1::BlockConverter,
     );
-    test_partial_with_converter(
+    let storage = test_partial_with_converter(
         htx_kind,
         HtxBuffer::new(storage),
         fragments,
         &mut h2::BlockConverter,
     );
+    storage
 }
 
 fn main() {
     let mut buffer = vec![0; 512];
     test(
         Kind::Request,
-        &mut buffer,
+        &mut buffer[..],
         b"CONNECT www.example.com:80 HTTP/1.1\r\nTE: lol\r\nTE: trailers\r\n\r\n",
     );
 
     test(
         Kind::Request,
-        &mut buffer,
+        &mut buffer[..],
         b"POST /cgi-bin/process.cgi HTTP/1.1\r
 User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
 Host: www.tutorialspoint.com\r

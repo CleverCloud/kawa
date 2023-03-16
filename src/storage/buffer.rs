@@ -1,5 +1,14 @@
 use std::{cmp::min, io, ptr};
 
+/// AsBuffer is the trait used by HtxBuffer to oparate on an arbitrary buffer.
+/// This is to allow the user to use Htx over any type as long as it exposes a continious slice
+/// of bytes. The previous solution directly used a slice of bytes but it introduces lifetimes.
+/// In this approach HtxBuffer owns the underlying buffer.
+pub trait AsBuffer {
+    fn as_buffer(&self) -> &[u8];
+    fn as_mut_buffer(&mut self) -> &mut [u8];
+}
+
 /// HtxBuffer is a pseudo ring buffer specifically designed to store data being parsed
 /// ```
 /// buffer        start   half     head  end   len
@@ -35,16 +44,15 @@ use std::{cmp::min, io, ptr};
 /// v        v            v                     v
 /// [        |            :                     ]
 /// ```
-pub struct HtxBuffer<'a> {
+pub struct HtxBuffer<T: AsBuffer> {
     pub start: usize,
     pub head: usize,
     pub end: usize,
-    pub buffer: &'a mut [u8],
+    pub buffer: T,
 }
 
-#[allow(dead_code)]
-impl<'a> HtxBuffer<'a> {
-    pub fn new(buffer: &'a mut [u8]) -> Self {
+impl<T: AsBuffer> HtxBuffer<T> {
+    pub fn new(buffer: T) -> Self {
         Self {
             start: 0,
             head: 0,
@@ -85,8 +93,8 @@ impl<'a> HtxBuffer<'a> {
         self.capacity() - self.end
     }
 
-    pub const fn capacity(&self) -> usize {
-        self.buffer.len()
+    pub fn capacity(&self) -> usize {
+        self.buffer().len()
     }
 
     pub fn empty(&self) -> bool {
@@ -109,6 +117,7 @@ impl<'a> HtxBuffer<'a> {
         self.start > self.capacity() / 2 || (self.start > 0 && self.empty())
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.start = 0;
         self.head = 0;
@@ -116,27 +125,32 @@ impl<'a> HtxBuffer<'a> {
     }
 
     pub fn buffer(&self) -> &[u8] {
-        self.buffer
+        self.buffer.as_buffer()
     }
 
+    pub fn mut_buffer(&mut self) -> &mut [u8] {
+        self.buffer.as_mut_buffer()
+    }
+
+    #[allow(dead_code)]
     pub fn data(&self) -> &[u8] {
         let range = self.start..self.end;
-        &self.buffer[range]
+        &self.buffer()[range]
     }
 
     pub fn unparsed_data(&self) -> &[u8] {
         let range = self.head..self.end;
-        &self.buffer[range]
+        &self.buffer()[range]
     }
 
     pub fn space(&mut self) -> &mut [u8] {
         let range = self.end..self.capacity();
-        &mut self.buffer[range]
+        &mut self.mut_buffer()[range]
     }
 
     pub fn used(&mut self) -> &[u8] {
         let range = ..self.end;
-        &mut self.buffer[range]
+        &self.buffer()[range]
     }
 
     pub fn shift(&mut self) -> usize {
@@ -146,8 +160,8 @@ impl<'a> HtxBuffer<'a> {
             unsafe {
                 let len = end - start;
                 ptr::copy(
-                    self.buffer[start..end].as_ptr(),
-                    self.buffer[..len].as_mut_ptr(),
+                    self.buffer()[start..end].as_ptr(),
+                    self.mut_buffer()[..len].as_mut_ptr(),
                     len,
                 );
                 self.start = 0;
@@ -159,7 +173,7 @@ impl<'a> HtxBuffer<'a> {
     }
 }
 
-impl io::Write for HtxBuffer<'_> {
+impl<T: AsBuffer> io::Write for HtxBuffer<T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.space().write(buf) {
             Ok(size) => {
@@ -175,12 +189,12 @@ impl io::Write for HtxBuffer<'_> {
     }
 }
 
-impl io::Read for HtxBuffer<'_> {
+impl<T: AsBuffer> io::Read for HtxBuffer<T> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let len = min(self.available_data(), buf.len());
         unsafe {
             ptr::copy(
-                self.buffer[self.start..self.start + len].as_ptr(),
+                self.buffer()[self.start..self.start + len].as_ptr(),
                 buf.as_mut_ptr(),
                 len,
             );

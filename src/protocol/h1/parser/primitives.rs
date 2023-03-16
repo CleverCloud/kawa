@@ -250,7 +250,7 @@ fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Sto
     Ok((&[], (authority, path)))
 }
 
-pub fn parse_url<'a>(method: &[u8], buffer: &[u8], i: &'a [u8]) -> Option<(Store, Store)> {
+pub fn parse_url(method: &[u8], buffer: &[u8], i: &[u8]) -> Option<(Store, Store)> {
     if i.is_empty() {
         return Some((Store::Empty, Store::Static(b"/")));
     }

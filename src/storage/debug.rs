@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::storage::{
-    Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBuffer, StatusLine, Store,
+    AsBuffer, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBuffer, StatusLine, Store,
 };
 
 fn to_utf8(buf: Option<&[u8]>) -> &str {
@@ -14,9 +14,9 @@ fn to_utf8(buf: Option<&[u8]>) -> &str {
     }
 }
 
-impl Htx<'_> {
+impl<T: AsBuffer> Htx<T> {
     pub fn debug(&self, pad: &str) -> Result<String, std::fmt::Error> {
-        let buf = &self.storage.buffer;
+        let buf = self.storage.buffer();
         let mut result = String::new();
         let pad_field = format!("{pad}  ");
         result.write_fmt(format_args!("HTX {{\n"))?;
@@ -199,7 +199,7 @@ impl Store {
     }
 }
 
-impl HtxBuffer<'_> {
+impl<T: AsBuffer> HtxBuffer<T> {
     pub fn debug(&self, pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
         result.write_fmt(format_args!("HtxBuffer {{"))?;
         result.write_fmt(format_args!("\n{pad}  start: {}", self.start))?;
@@ -211,7 +211,7 @@ impl HtxBuffer<'_> {
     }
 }
 
-pub fn debug_htx(htx: &Htx) {
+pub fn debug_htx<T: AsBuffer>(htx: &Htx<T>) {
     match htx.debug("") {
         Ok(result) => println!("{result}"),
         Err(error) => println!("{error:?}"),

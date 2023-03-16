@@ -1,11 +1,11 @@
 use std::{collections::VecDeque, io::IoSlice};
 
-use crate::storage::{HtxBlockConverter, HtxBuffer};
+use crate::storage::{AsBuffer, HtxBlockConverter, HtxBuffer};
 
 /// Intermediate representation for both H1 and H2 protocols
-pub struct Htx<'a> {
+pub struct Htx<T: AsBuffer> {
     pub kind: Kind,
-    pub storage: HtxBuffer<'a>,
+    pub storage: HtxBuffer<T>,
     pub blocks: VecDeque<HtxBlock>,
     pub out: VecDeque<OutBlock>,
     pub expects: usize,
@@ -13,8 +13,8 @@ pub struct Htx<'a> {
     pub body_size: BodySize,
 }
 
-impl<'a> Htx<'a> {
-    pub fn new(kind: Kind, storage: HtxBuffer<'a>) -> Self {
+impl<T: AsBuffer> Htx<T> {
+    pub fn new(kind: Kind, storage: HtxBuffer<T>) -> Self {
         Self {
             kind,
             blocks: VecDeque::new(),
@@ -35,7 +35,7 @@ impl<'a> Htx<'a> {
         }
     }
 
-    pub fn prepare(&mut self, converter: &mut impl HtxBlockConverter) {
+    pub fn prepare(&mut self, converter: &mut impl HtxBlockConverter<T>) {
         converter.initialize(self);
         while let Some(block) = self.blocks.pop_front() {
             converter.call(block, self);
@@ -52,7 +52,7 @@ impl<'a> Htx<'a> {
             })
             .map(|block| match block {
                 OutBlock::Delimiter => unreachable!(), // due to previous take_while
-                OutBlock::Store(store) => IoSlice::new(store.data(self.storage.buffer)),
+                OutBlock::Store(store) => IoSlice::new(store.data(self.storage.buffer())),
             })
             .collect()
     }
@@ -107,6 +107,16 @@ impl<'a> Htx<'a> {
 
     pub fn is_streaming(&self) -> bool {
         matches!(self.body_size, BodySize::Chunked)
+    }
+
+    #[allow(dead_code)]
+    pub fn clear(&mut self) {
+        self.storage.clear();
+        self.blocks.clear();
+        self.out.clear();
+        self.expects = 0;
+        self.parsing_phase = ParsingPhase::StatusLine;
+        self.body_size = BodySize::Empty;
     }
 }
 
