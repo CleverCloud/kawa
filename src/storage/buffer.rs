@@ -97,14 +97,13 @@ impl<T: AsBuffer> HtxBuffer<T> {
         self.buffer().len()
     }
 
-    pub fn empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.start == self.end
     }
 
-    pub fn consume(&mut self, count: usize) -> usize {
-        let count = min(count, self.available_data());
-        self.start += count;
-        count
+    #[allow(dead_code)]
+    pub fn is_full(&self) -> bool {
+        self.end == self.capacity()
     }
 
     pub fn fill(&mut self, count: usize) -> usize {
@@ -113,8 +112,10 @@ impl<T: AsBuffer> HtxBuffer<T> {
         count
     }
 
-    pub fn should_shift(&self) -> bool {
-        self.start > self.capacity() / 2 || (self.start > 0 && self.empty())
+    pub fn consume(&mut self, count: usize) -> usize {
+        let count = min(count, self.available_data());
+        self.start += count;
+        count
     }
 
     #[allow(dead_code)]
@@ -151,6 +152,10 @@ impl<T: AsBuffer> HtxBuffer<T> {
     pub fn used(&mut self) -> &[u8] {
         let range = ..self.end;
         &self.buffer()[range]
+    }
+
+    pub fn should_shift(&self) -> bool {
+        self.start > self.capacity() / 2 || (self.start > 0 && self.is_empty())
     }
 
     pub fn shift(&mut self) -> usize {

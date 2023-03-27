@@ -99,10 +99,10 @@ HTTP/1.1 [200] [OK]
 ## HTX use cases
 
 Say we want to:
-    - remove the "User-Agent" header,
-    - add a "Sozu-id" header,
-    - change header "Connection" to "close",
-    - change trailer "Foo" to "bazz",
+- remove the "User-Agent" header,
+- add a "Sozu-id" header,
+- change header "Connection" to "close",
+- change trailer "Foo" to "bazz",
 
 All this can be accomplished regardless of the underlying protocol (HTTP/1 or HTTP/2)
 using the generic HTX representation:

@@ -216,6 +216,6 @@ pub fn debug_htx<T: AsBuffer>(htx: &Htx<T>) {
         Ok(result) => println!("{result}"),
         Err(error) => println!("{error:?}"),
     }
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line).expect("stdin");
+    // let mut line = String::new();
+    // std::io::stdin().read_line(&mut line).expect("stdin");
 }

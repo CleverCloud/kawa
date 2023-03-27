@@ -28,6 +28,7 @@ fn handle_error<T: AsBuffer, E>(htx: &Htx<T>, error: NomError<E>) -> ParsingPhas
 }
 
 fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
+    println!("PROCESSING!");
     let buf = &mut htx.storage.mut_buffer();
 
     let (mut authority, path) = match htx.blocks.get_mut(0) {
@@ -52,7 +53,7 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
             HtxBlock::Header(header) => {
                 let key = header.key.data(buf);
                 if compare_no_case(key, b"connection") {
-                    header.val.modify(buf, b"close")
+                    // header.val.modify(buf, b"close")
                 } else if compare_no_case(key, b"host") {
                     // request line has higher priority than Host header
                     if let Store::Empty = authority {
@@ -148,8 +149,13 @@ pub fn parse<T: AsBuffer>(htx: &mut Htx<T>) {
             },
             ParsingPhase::Body => {
                 let len = unparsed_buf.len();
-                let taken = min(len, htx.expects);
-                htx.expects -= taken;
+                let taken = if htx.body_size == BodySize::Empty {
+                    len
+                } else {
+                    let taken = min(len, htx.expects);
+                    htx.expects -= taken;
+                    taken
+                };
                 htx.blocks.push_back(HtxBlock::Chunk(Chunk {
                     data: Store::new_slice(buf, &unparsed_buf[..taken]),
                 }));
@@ -245,10 +251,14 @@ pub fn parse<T: AsBuffer>(htx: &mut Htx<T>) {
             }
             need_processing = false;
             htx.parsing_phase = match htx.body_size {
-                BodySize::Empty | BodySize::Length(0) => ParsingPhase::Terminated,
                 BodySize::Chunked => ParsingPhase::Chunks { first: true },
+                BodySize::Length(0) => ParsingPhase::Terminated,
                 BodySize::Length(length) => {
                     htx.expects = length;
+                    ParsingPhase::Body
+                }
+                BodySize::Empty => {
+                    htx.expects = 1;
                     ParsingPhase::Body
                 }
             };
