@@ -9,7 +9,7 @@ use crate::{
     protocol::{
         h1::parser::primitives::{
             crlf, parse_chunk_header, parse_header, parse_request_line, parse_response_line,
-            parse_url,
+            parse_single_crumb, parse_url,
         },
         utils::compare_no_case,
     },
@@ -30,8 +30,8 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
     println!("PROCESSING!");
     let buf = &mut htx.storage.mut_buffer();
 
-    let (mut authority, path) = match htx.blocks.get_mut(0) {
-        Some(HtxBlock::StatusLine(StatusLine::Request { uri, method, .. })) => {
+    let (mut authority, path) = match &htx.detached.status_line {
+        StatusLine::Request { uri, method, .. } => {
             let uri = uri.data(buf);
             let method = method.data(buf);
             match parse_url(buf, method, uri) {
@@ -42,8 +42,7 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
                 }
             }
         }
-        Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => (Store::Empty, Store::Empty),
-        _ => unreachable!(),
+        StatusLine::Response { .. } => (Store::Empty, Store::Empty),
     };
 
     for block in &mut htx.blocks {
@@ -82,17 +81,16 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
             _ => {}
         }
     }
-    match htx.blocks.get_mut(0) {
-        Some(HtxBlock::StatusLine(StatusLine::Request {
+    match &mut htx.detached.status_line {
+        StatusLine::Request {
             authority: old_authority,
             path: old_path,
             ..
-        })) => {
+        } => {
             *old_authority = authority;
             *old_path = path;
         }
-        Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => {}
-        _ => unreachable!(),
+        StatusLine::Response { .. } => {}
     };
     // htx.blocks.push_back(HtxBlock::Header(Header {
     //     key: Store::Static(b"Sozu-id"),
@@ -129,14 +127,34 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(htx: &mut Htx<T>, callbacks: &m
                     }
                 };
                 println!("{status_line:?}");
-                htx.blocks.push_back(HtxBlock::StatusLine(status_line));
+                htx.blocks.push_back(HtxBlock::StatusLine);
+                htx.detached.status_line = status_line;
                 htx.parsing_phase = ParsingPhase::Headers;
                 i
             }
             ParsingPhase::Headers => match parse_header(buf, unparsed_buf) {
                 Ok((i, header)) => {
                     println!("{header:?}");
-                    htx.blocks.push_back(HtxBlock::Header(header));
+                    let key = header.key.data(buf);
+                    if compare_no_case(key, b"cookies") {
+                        htx.blocks.push_back(HtxBlock::Cookies);
+                        let mut cookie = header.val.data(buf);
+                        while !cookie.is_empty() {
+                            match parse_single_crumb(buf, cookie) {
+                                Ok((i, crumb)) => {
+                                    htx.detached.jar.push_back(crumb);
+                                    cookie = i;
+                                }
+                                Err(error) => {
+                                    println!("{error:?}");
+                                    htx.parsing_phase = ParsingPhase::Error;
+                                    return;
+                                }
+                            }
+                        }
+                    } else {
+                        htx.blocks.push_back(HtxBlock::Header(header));
+                    }
                     i
                 }
                 Err(NomError::Incomplete(_)) => {

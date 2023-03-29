@@ -1,6 +1,6 @@
 use crate::storage::{
-    AsBuffer, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine,
-    Store, Version,
+    AsBuffer, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBlockConverter, OutBlock,
+    StatusLine, Store, Version,
 };
 
 pub struct BlockConverter;
@@ -10,6 +10,7 @@ impl Version {
         match self {
             Version::V10 => Store::Static(b"HTTP/1.0"),
             Version::V11 | Version::V20 => Store::Static(b"HTTP/1.1"),
+            Version::Unknown => unreachable!(),
         }
     }
 }
@@ -17,33 +18,46 @@ impl Version {
 impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
     fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
         match block {
-            HtxBlock::StatusLine(StatusLine::Request {
-                version,
-                method,
-                uri,
-                authority,
-                ..
-            }) => {
-                htx.push_out(method);
-                htx.push_out(Store::Static(b" "));
-                htx.push_out(uri);
-                htx.push_out(Store::Static(b" "));
-                htx.push_out(version.as_store());
-                htx.push_out(Store::Static(b"\r\nHost: "));
-                htx.push_out(authority);
-                htx.push_out(Store::Static(b"\r\n"));
-            }
-            HtxBlock::StatusLine(StatusLine::Response {
-                version,
-                status,
-                reason,
-                ..
-            }) => {
-                htx.push_out(version.as_store());
-                htx.push_out(Store::Static(b" "));
-                htx.push_out(status);
-                htx.push_out(Store::Static(b" "));
-                htx.push_out(reason);
+            HtxBlock::StatusLine => match htx.detached.status_line.clone() {
+                StatusLine::Request {
+                    version,
+                    method,
+                    uri,
+                    authority,
+                    ..
+                } => {
+                    htx.push_out(method);
+                    htx.push_out(Store::Static(b" "));
+                    htx.push_out(uri);
+                    htx.push_out(Store::Static(b" "));
+                    htx.push_out(version.as_store());
+                    htx.push_out(Store::Static(b"\r\nHost: "));
+                    htx.push_out(authority);
+                    htx.push_out(Store::Static(b"\r\n"));
+                }
+                StatusLine::Response {
+                    version,
+                    status,
+                    reason,
+                    ..
+                } => {
+                    htx.push_out(version.as_store());
+                    htx.push_out(Store::Static(b" "));
+                    htx.push_out(status);
+                    htx.push_out(Store::Static(b" "));
+                    htx.push_out(reason);
+                    htx.push_out(Store::Static(b"\r\n"));
+                }
+            },
+            HtxBlock::Cookies => {
+                if htx.detached.jar.is_empty() {
+                    return;
+                }
+                htx.push_out(Store::Static(b"Cookies: "));
+                for cookie in htx.detached.jar.drain(..) {
+                    htx.out.push_back(OutBlock::Store(cookie));
+                    htx.out.push_back(OutBlock::Store(Store::Static(b"; ")));
+                }
                 htx.push_out(Store::Static(b"\r\n"));
             }
             HtxBlock::Header(Header {
