@@ -273,6 +273,12 @@ pub struct Header {
     pub val: Store,
 }
 
+impl Header {
+    pub fn is_elided(&self) -> bool {
+        self.key.is_empty()
+    }
+}
+
 #[derive(Debug)]
 pub struct ChunkHeader {
     pub length: Store,
@@ -332,6 +338,11 @@ impl Store {
         Store::Vec(data.to_vec().into_boxed_slice(), 0)
     }
 
+    #[allow(dead_code)]
+    pub fn from_string(data: String) -> Store {
+        Store::Vec(data.into_bytes().into_boxed_slice(), 0)
+    }
+
     pub fn push_left(&mut self, amount: u32) {
         match self {
             Store::Slice(slice) => {
@@ -342,6 +353,10 @@ impl Store {
             }
             _ => {}
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Store::Empty)
     }
 
     pub fn data<'a>(&'a self, buf: &'a [u8]) -> &'a [u8] {
@@ -359,6 +374,16 @@ impl Store {
             Store::Slice(slice) | Store::Deported(slice) => slice.data(buf),
             Store::Static(data) => Some(data),
             Store::Vec(data, index) => Some(&data[*index as usize..]),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn capture<'a>(&'a mut self, buf: &'a [u8]) {
+        match self {
+            Store::Slice(slice) | Store::Deported(slice) => {
+                *self = Store::new_vec(slice.data(buf).expect("DATA"));
+            }
+            _ => {}
         }
     }
 

@@ -25,7 +25,7 @@ fn test_with_converter<T: AsBuffer, C: HtxBlockConverter<T>>(
     let _ = htx.storage.write(fragment).expect("WRITE");
     debug_htx(&htx);
 
-    h1::parse(&mut htx);
+    h1::parse(&mut htx, &mut h1::NoCallbacks);
     debug_htx(&htx);
 
     htx.prepare(converter);
@@ -71,7 +71,7 @@ fn test_partial_with_converter<T: AsBuffer, C: HtxBlockConverter<T>>(
         println!("===============================\n{buffer}\n===============================");
         debug_htx(&htx);
 
-        h1::parse(&mut htx);
+        h1::parse(&mut htx, &mut h1::NoCallbacks);
         debug_htx(&htx);
 
         htx.prepare(converter);

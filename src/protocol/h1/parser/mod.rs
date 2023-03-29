@@ -15,8 +15,7 @@ use crate::{
     },
     storage::AsBuffer,
     storage::{
-        BodySize, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, Kind, ParsingPhase, StatusLine,
-        Store,
+        BodySize, Chunk, ChunkHeader, Flags, Htx, HtxBlock, Kind, ParsingPhase, StatusLine, Store,
     },
 };
 
@@ -48,11 +47,11 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
     };
 
     for block in &mut htx.blocks {
-        #[allow(clippy::single_match)]
         match block {
-            HtxBlock::Header(header) => {
+            HtxBlock::Header(header) if !header.is_elided() => {
                 let key = header.key.data(buf);
                 if compare_no_case(key, b"connection") {
+                    // TODO: check for upgrade?
                     // header.val.modify(buf, b"close")
                 } else if compare_no_case(key, b"host") {
                     // request line has higher priority than Host header
@@ -95,13 +94,20 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
         Some(HtxBlock::StatusLine(StatusLine::Response { .. })) => {}
         _ => unreachable!(),
     };
-    htx.blocks.push_back(HtxBlock::Header(Header {
-        key: Store::Static(b"Sozu-id"),
-        val: Store::new_vec(format!("SOZUBALANCEID-{}", htx.storage.head).as_bytes()),
-    }));
+    // htx.blocks.push_back(HtxBlock::Header(Header {
+    //     key: Store::Static(b"Sozu-id"),
+    //     val: Store::new_vec(format!("SOZUBALANCEID-{}", htx.storage.head).as_bytes()),
+    // }));
 }
 
-pub fn parse<T: AsBuffer>(htx: &mut Htx<T>) {
+pub trait ParserCallbacks<T: AsBuffer> {
+    fn on_headers(&mut self, _htx: &mut Htx<T>) {}
+}
+
+pub struct NoCallbacks;
+impl<T: AsBuffer> ParserCallbacks<T> for NoCallbacks {}
+
+pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(htx: &mut Htx<T>, callbacks: &mut C) {
     let mut need_processing = false;
     loop {
         let unparsed_buf = htx.storage.unparsed_data();
@@ -262,6 +268,7 @@ pub fn parse<T: AsBuffer>(htx: &mut Htx<T>) {
                     ParsingPhase::Body
                 }
             };
+            callbacks.on_headers(htx);
             htx.blocks.push_back(HtxBlock::Flags(Flags {
                 end_body: false,
                 end_chunk: false,

@@ -156,16 +156,6 @@ pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Header>
     ))
 }
 
-//not a space nor a comma
-//
-// allows ISO-8859-1 characters in header values
-// this is allowed in RFC 2616 but not in rfc7230
-// cf https://github.com/sozu-proxy/sozu/issues/479
-#[cfg(feature = "tolerant-http1-parser")]
-fn is_single_header_value_char(i: u8) -> bool {
-    (i > 33 && i <= 126 && i != 44) || i >= 160
-}
-
 pub fn chunk_size(i: &[u8]) -> IResult<&[u8], (&[u8], usize)> {
     let (i, size_hexa) = hex_digit1(i)?;
     let size = std::str::from_utf8(size_hexa)
