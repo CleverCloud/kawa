@@ -18,7 +18,7 @@ impl Version {
 impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
     fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
         match block {
-            HtxBlock::StatusLine => match htx.detached.status_line.clone() {
+            HtxBlock::StatusLine => match htx.detached.status_line.pop() {
                 StatusLine::Request {
                     version,
                     method,
@@ -48,6 +48,7 @@ impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
                     htx.push_out(reason);
                     htx.push_out(Store::Static(b"\r\n"));
                 }
+                StatusLine::Unknown => unreachable!(),
             },
             HtxBlock::Cookies => {
                 if htx.detached.jar.is_empty() {

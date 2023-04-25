@@ -1,5 +1,3 @@
-use std::str::from_utf8_unchecked;
-
 use nom::{
     bytes::{
         complete::{take_while, take_while1},
@@ -171,7 +169,6 @@ fn is_single_crumb_char(i: u8) -> bool {
 /// ```
 pub fn parse_single_crumb<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Store> {
     let (i, value) = take_while1(is_single_crumb_char)(i)?;
-    println!("{}", unsafe { from_utf8_unchecked(value) });
     let value = Store::new_slice(buffer, value);
     if i.is_empty() {
         return Ok((i, value));

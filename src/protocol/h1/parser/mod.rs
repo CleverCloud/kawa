@@ -27,7 +27,6 @@ fn handle_error<T: AsBuffer, E>(htx: &Htx<T>, error: NomError<E>) -> ParsingPhas
 }
 
 fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
-    println!("PROCESSING!");
     let buf = &mut htx.storage.mut_buffer();
 
     let (mut authority, path) = match &htx.detached.status_line {
@@ -42,7 +41,7 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
                 }
             }
         }
-        StatusLine::Response { .. } => (Store::Empty, Store::Empty),
+        _ => (Store::Empty, Store::Empty),
     };
 
     for block in &mut htx.blocks {
@@ -90,12 +89,14 @@ fn process_headers<T: AsBuffer>(htx: &mut Htx<T>) {
             *old_authority = authority;
             *old_path = path;
         }
-        StatusLine::Response { .. } => {}
+        StatusLine::Response { code: 100, .. } => {
+            htx.body_size = BodySize::Length(0);
+        }
+        StatusLine::Response { code: 101, .. } => {
+            htx.body_size = BodySize::Length(0);
+        }
+        _ => {}
     };
-    // htx.blocks.push_back(HtxBlock::Header(Header {
-    //     key: Store::Static(b"Sozu-id"),
-    //     val: Store::new_vec(format!("SOZUBALANCEID-{}", htx.storage.head).as_bytes()),
-    // }));
 }
 
 pub trait ParserCallbacks<T: AsBuffer> {
@@ -126,7 +127,6 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(htx: &mut Htx<T>, callbacks: &m
                         break;
                     }
                 };
-                println!("{status_line:?}");
                 htx.blocks.push_back(HtxBlock::StatusLine);
                 htx.detached.status_line = status_line;
                 htx.parsing_phase = ParsingPhase::Headers;
@@ -134,7 +134,6 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(htx: &mut Htx<T>, callbacks: &m
             }
             ParsingPhase::Headers => match parse_header(buf, unparsed_buf) {
                 Ok((i, header)) => {
-                    println!("{header:?}");
                     let key = header.key.data(buf);
                     if compare_no_case(key, b"cookies") {
                         htx.blocks.push_back(HtxBlock::Cookies);
@@ -145,8 +144,7 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(htx: &mut Htx<T>, callbacks: &m
                                     htx.detached.jar.push_back(crumb);
                                     cookie = i;
                                 }
-                                Err(error) => {
-                                    println!("{error:?}");
+                                Err(_) => {
                                     htx.parsing_phase = ParsingPhase::Error;
                                     return;
                                 }
@@ -241,7 +239,6 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(htx: &mut Htx<T>, callbacks: &m
             }
             ParsingPhase::Trailers => match parse_header(buf, unparsed_buf) {
                 Ok((i, header)) => {
-                    println!("{header:?}");
                     htx.blocks.push_back(HtxBlock::Header(header));
                     i
                 }

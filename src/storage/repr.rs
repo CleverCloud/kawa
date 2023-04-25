@@ -50,7 +50,7 @@ impl<T: AsBuffer> Htx<T> {
             body_size: BodySize::Empty,
             storage,
             detached: HtxDetachedBlocks {
-                status_line: StatusLine::new(kind),
+                status_line: StatusLine::Unknown,
                 jar: VecDeque::new(),
             },
         }
@@ -184,9 +184,7 @@ impl<T: AsBuffer> Htx<T> {
 
     #[allow(dead_code)]
     pub fn is_completed(&self) -> bool {
-        self.parsing_phase == ParsingPhase::Terminated
-            && self.blocks.is_empty()
-            && self.out.is_empty()
+        self.blocks.is_empty() && self.out.is_empty()
     }
 
     /// Completely reset the Htx state and storage.
@@ -195,6 +193,8 @@ impl<T: AsBuffer> Htx<T> {
         self.storage.clear();
         self.blocks.clear();
         self.out.clear();
+        self.detached.jar.clear();
+        self.detached.status_line = StatusLine::Unknown;
         self.expects = 0;
         self.parsing_phase = ParsingPhase::StatusLine;
         self.body_size = BodySize::Empty;
@@ -262,6 +262,7 @@ impl HtxBlock {
 
 #[derive(Debug, Clone)]
 pub enum StatusLine {
+    Unknown,
     Request {
         version: Version,
         method: Store,
@@ -278,24 +279,6 @@ pub enum StatusLine {
 }
 
 impl StatusLine {
-    pub fn new(kind: Kind) -> Self {
-        match kind {
-            Kind::Request => Self::Request {
-                version: Version::Unknown,
-                method: Store::Empty,
-                authority: Store::Empty,
-                path: Store::Empty,
-                uri: Store::Empty,
-            },
-            Kind::Response => Self::Response {
-                version: Version::Unknown,
-                code: 0,
-                status: Store::Empty,
-                reason: Store::Empty,
-            },
-        }
-    }
-
     #[allow(dead_code)]
     pub fn pop(&mut self) -> StatusLine {
         match self {
@@ -320,6 +303,7 @@ impl StatusLine {
                 std::mem::swap(self, &mut owned);
                 owned
             }
+            StatusLine::Unknown => StatusLine::Unknown,
         }
     }
 }
@@ -395,11 +379,13 @@ impl Store {
     }
 
     pub fn new_vec(data: &[u8]) -> Store {
+        #[allow(clippy::useless_conversion)]
         Store::Alloc(data.to_vec().into_boxed_slice().into(), 0)
     }
 
     #[allow(dead_code)]
     pub fn from_string(data: String) -> Store {
+        #[allow(clippy::useless_conversion)]
         Store::Alloc(data.into_bytes().into_boxed_slice().into(), 0)
     }
 
@@ -438,7 +424,7 @@ impl Store {
     }
 
     #[allow(dead_code)]
-    pub fn capture<'a>(self, buf: &'a [u8]) -> Store {
+    pub fn capture(self, buf: &[u8]) -> Store {
         match self {
             Store::Slice(slice) | Store::Deported(slice) => {
                 Store::new_vec(slice.data(buf).expect("DATA"))
@@ -551,6 +537,7 @@ impl Slice {
         }
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len as usize
     }

@@ -116,6 +116,7 @@ impl StatusLine {
                 reason.debug(buf, &pad_field, result)?;
                 result.write_fmt(format_args!(",\n{pad}}}"))?;
             }
+            StatusLine::Unknown => result.write_fmt(format_args!("StatusLine::Unknown"))?,
         }
         Ok(())
     }
@@ -231,6 +232,6 @@ pub fn debug_htx<T: AsBuffer>(htx: &Htx<T>) {
         Ok(result) => println!("{result}"),
         Err(error) => println!("{error:?}"),
     }
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line).expect("stdin");
+    // let mut line = String::new();
+    // std::io::stdin().read_line(&mut line).expect("stdin");
 }
