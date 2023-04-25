@@ -1,61 +1,60 @@
 use crate::{
     protocol::utils::compare_no_case,
     storage::{
-        AsBuffer, Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, OutBlock, StatusLine,
-        Store,
+        AsBuffer, Block, BlockConverter, Chunk, Flags, Header, Kawa, OutBlock, StatusLine, Store,
     },
 };
 
-pub struct BlockConverter;
+pub struct H2BlockConverter;
 
-impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
-    fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
+impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
+    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) {
         match block {
-            HtxBlock::StatusLine => match htx.detached.status_line.pop() {
+            Block::StatusLine => match kawa.detached.status_line.pop() {
                 StatusLine::Request {
                     method,
                     authority,
                     path,
                     ..
                 } => {
-                    htx.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
-                    htx.push_out(Store::Static(b":method: "));
-                    htx.push_out(method);
-                    htx.push_out(Store::Static(b"\n:authority: "));
-                    htx.push_out(authority);
-                    htx.push_out(Store::Static(b"\n:path: "));
-                    htx.push_out(path);
-                    htx.push_out(Store::Static(b"\n:scheme: http\n"));
+                    kawa.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
+                    kawa.push_out(Store::Static(b":method: "));
+                    kawa.push_out(method);
+                    kawa.push_out(Store::Static(b"\n:authority: "));
+                    kawa.push_out(authority);
+                    kawa.push_out(Store::Static(b"\n:path: "));
+                    kawa.push_out(path);
+                    kawa.push_out(Store::Static(b"\n:scheme: http\n"));
                 }
                 StatusLine::Response { status, .. } => {
-                    htx.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
-                    htx.push_out(Store::Static(b":status: "));
-                    htx.push_out(status);
-                    htx.push_out(Store::Static(b"\n"));
+                    kawa.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
+                    kawa.push_out(Store::Static(b":status: "));
+                    kawa.push_out(status);
+                    kawa.push_out(Store::Static(b"\n"));
                 }
                 StatusLine::Unknown => unreachable!(),
             },
-            HtxBlock::Cookies => {
-                if htx.detached.jar.is_empty() {
+            Block::Cookies => {
+                if kawa.detached.jar.is_empty() {
                     return;
                 }
-                htx.push_out(Store::Static(b"------------ HEADER"));
-                for cookie in htx.detached.jar.drain(..) {
-                    htx.out
+                kawa.push_out(Store::Static(b"------------ HEADER"));
+                for cookie in kawa.detached.jar.drain(..) {
+                    kawa.out
                         .push_back(OutBlock::Store(Store::Static(b"\nCookies: ")));
-                    htx.out.push_back(OutBlock::Store(cookie));
+                    kawa.out.push_back(OutBlock::Store(cookie));
                 }
-                htx.push_out(Store::Static(b"\n"));
+                kawa.push_out(Store::Static(b"\n"));
             }
-            HtxBlock::Header(Header {
+            Block::Header(Header {
                 key: Store::Empty, ..
             }) => {
                 // elided header
             }
-            HtxBlock::Header(Header { key, val }) => {
+            Block::Header(Header { key, val }) => {
                 {
-                    let key = key.data(htx.storage.buffer());
-                    let val = val.data(htx.storage.buffer());
+                    let key = key.data(kawa.storage.buffer());
+                    let val = val.data(kawa.storage.buffer());
                     if compare_no_case(key, b"connection")
                         || compare_no_case(key, b"host")
                         || compare_no_case(key, b"http2-settings")
@@ -69,34 +68,34 @@ impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
                         return;
                     }
                 }
-                htx.push_out(Store::Static(b"------------ HEADER\n"));
-                htx.push_out(key);
-                htx.push_out(Store::Static(b": "));
-                htx.push_out(val);
-                htx.push_out(Store::Static(b"\n"));
+                kawa.push_out(Store::Static(b"------------ HEADER\n"));
+                kawa.push_out(key);
+                kawa.push_out(Store::Static(b": "));
+                kawa.push_out(val);
+                kawa.push_out(Store::Static(b"\n"));
             }
-            HtxBlock::ChunkHeader(_) => {
+            Block::ChunkHeader(_) => {
                 // this converter doesn't align H1 chunks on H2 data frames
             }
-            HtxBlock::Chunk(Chunk { data }) => {
-                htx.push_out(Store::Static(b"------------ DATA\n"));
-                htx.push_out(data);
-                htx.push_out(Store::Static(b"\n"));
-                htx.push_delimiter()
+            Block::Chunk(Chunk { data }) => {
+                kawa.push_out(Store::Static(b"------------ DATA\n"));
+                kawa.push_out(data);
+                kawa.push_out(Store::Static(b"\n"));
+                kawa.push_delimiter()
             }
-            HtxBlock::Flags(Flags {
+            Block::Flags(Flags {
                 end_header,
                 end_stream,
                 ..
             }) => {
                 if end_header {
-                    htx.push_out(Store::Static(b"------------ END HEADER\n"));
+                    kawa.push_out(Store::Static(b"------------ END HEADER\n"));
                 }
                 if end_stream {
-                    htx.push_out(Store::Static(b"------------ END STREAM\n"));
+                    kawa.push_out(Store::Static(b"------------ END STREAM\n"));
                 }
                 if end_header || end_stream {
-                    htx.push_delimiter()
+                    kawa.push_delimiter()
                 }
             }
         }

@@ -1,10 +1,10 @@
-# HTX
+# Kawa
 
 Agnostic representation of HTTP1 and HTTP2, with zero-copy, made for Sōzu.
 
 # Principles
 
-Consider the following HTTP/1.1 response stored in an `HtxBuffer`:
+Consider the following HTTP/1.1 response stored in a `Buffer`:
 
 ```txt
 HTTP/1.1 200 OK
@@ -22,13 +22,14 @@ Foo: bar                       // trailer header "Foo"
 
 ```
 
-## HTX generic representation
+## HTTP generic representation
 
 It can be parsed in place, extracting the essential content (header names, values...)
-and stored as a vector of HTX blocks. HTX is an intermediary, protocol agnostic, representation of HTTP:
+and stored as a vector of HTTP generic blocks. Kawa is an intermediary, protocol agnostic,
+representation of HTTP:
 
 ```rs
-htx_blocks: [
+kawa_blocks: [
     StatusLine::Response(V11, Slice("200"), Slice("OK")),
     Header(Slice("Transfer-Encoding"), Slice("chunked")),
     Header(Slice("Connection"), Slice("Keep-Alive")),
@@ -47,19 +48,19 @@ htx_blocks: [
 ]
 ```
 
-> note: `ChunkHeader` is the only protocol specific `HtxBlock`. It holds the chunk size present in
+> note: `ChunkHeader` is the only protocol specific `Block`. It holds the chunk size present in
 > an HTTP/1.1 chunk header. They can safely be ignored by an HTTP/2 converter. The `Flags` blocks
 > holds context dependant information, allowing converters to be stateless.
 
 Importantly, `Chunk` blocks don't necessarily hold an entire chunk. They may only contain a
 fraction of a bigger chunk. Meaning these two representation are strictly identical:
 ```rs
-htx_full_chunk: [
+kawa_full_chunk: [
     ChunkHeader(Slice("4")),
     Chunk(Slice("Wiki")),
     Flags(END_CHUNK),
 ]
-htx_fragmented_chunk: [
+kawa_fragmented_chunk: [
     ChunkHeader(Slice("4")),
     Chunk(Slice("Wi")),
     Chunk(Slice("k")),
@@ -74,8 +75,8 @@ htx_fragmented_chunk: [
 
 ## Reference buffer content with Slices
 
-Note that `HtxBlocks` never copy data. They reference parts of the request using `Store::Slices`
-which only holds a start index and a length. The `HtxBuffer` can be viewed as followed, marking
+Note that `Blocks` never copy data. They reference parts of the request using `Store::Slices`
+which only holds a start index and a length. The `Buffer` can be viewed as followed, marking
 the referenced data in braces:
 
 ```txt
@@ -96,7 +97,7 @@ HTTP/1.1 [200] [OK]
 
 > note: technically everything out of the braces is useless and will never be used
 
-## HTX use cases
+## Kawa use cases
 
 Say we want to:
 - remove the "User-Agent" header,
@@ -105,21 +106,21 @@ Say we want to:
 - change trailer "Foo" to "bazz",
 
 All this can be accomplished regardless of the underlying protocol (HTTP/1 or HTTP/2)
-using the generic HTX representation:
+using the generic Kawa representation:
 
 ```rs
-    htx_blocks.remove(3); // remove "User-Agent" header
-    htx_blocks.insert(3, Header(Static("Sozu-id"), Vec(sozu_id.as_bytes().to_vec())));
-    htx_blocks[2].val.modify("close");
-    htx_blocks[13].val.modify("bazz");
+    kawa_blocks.remove(3); // remove "User-Agent" header
+    kawa_blocks.insert(3, Header(Static("Sozu-id"), Vec(sozu_id.as_bytes().to_vec())));
+    kawa_blocks[2].val.modify("close");
+    kawa_blocks[13].val.modify("bazz");
 ```
 
 > note: `modify` should only be used with dynamic values that will be dropped to give then a proper lifetime.
 > For static values (like "close") use a `Store::Static` instead, this is only for the example.
-> `htx_blocks[2].val = Static("close")` would be more efficient.
+> `kawa_blocks[2].val = Static("close")` would be more efficient.
 
 ```rs
-htx_blocks: [
+kawa_blocks: [
     StatusLine::Response(V11, Slice("200"), Slice("OK")),
     Header(Slice("Transfer-Encoding"), Slice("chunked")),
     // "close" is shorter than "Keep-Alive" so it was written in place and kept as a Slice
@@ -162,7 +163,7 @@ Now that the response was successfully edited we can convert it back to a specif
 For simplicity's sake, let's convert it back to HTTP/1:
 
 ```rs
-htx_blocks: [] // HtxBlocks are consumed
+kawa_blocks: [] // Blocks are consumed
 out: [
     // StatusLine::Request
     Static("HTTP/1.1"),
@@ -252,8 +253,8 @@ Foo: bazz
 ## Memory management
 
 Say the socket only wrote up to "Wi" of "Wikipedia" (109 bytes).
-After each write, `Htx::consume` should be called with the number of bytes written.
-This signals HTX to free unecessary `Stores` from its `out` vector and reclaim space in its `HtxBuffer` if possible.
+After each write, `Kawa::consume` should be called with the number of bytes written.
+This signals Kawa to free unecessary `Stores` from its `out` vector and reclaim space in its `Buffer` if possible.
 In our case, Walking and discarding the `Stores` from `out` it remains:
 
 ```rs
@@ -292,10 +293,10 @@ Wi[ki]
 
 ```
 
-This can be measured with `Htx::leftmost_ref` which returns the start of the leftmost `Store::Slice`,
-indicating that everything before that point in the `HtxBuffer` is unused. Here it would return 115.
-`HtxBuffer::consume` will be called with this value. In case the `HtxBuffer` considers that it should
-shift its data to free this space (`HtxBuffer::should_shift`), `HtxBuffer::shift` is called memmoving
+This can be measured with `Kawa::leftmost_ref` which returns the start of the leftmost `Store::Slice`,
+indicating that everything before that point in the `Buffer` is unused. Here it would return 115.
+`Buffer::consume` will be called with this value. In case the `Buffer` considers that it should
+shift its data to free this space (`Buffer::should_shift`), `Buffer::shift` is called memmoving
 the data back to the start of the buffer. The buffer would look like:
 
 ```txt
@@ -308,7 +309,7 @@ Foo: bar
 ```
 
 > note: this is the only instance of copying data in this module and is necessary to not run out of
-> memory unless we change the data structure of `HtxBuffer` (with a real ring buffer for example).
+> memory unless we change the data structure of `Buffer` (with a real ring buffer for example).
 > Nevertheless this should be negligeable with most shifts copying 0 or very few bytes.
 
 As a result, the remaining `Store::Slices` in the out vector reference data that has been moved.
@@ -330,7 +331,7 @@ out: [
 ]
 ```
 
-In order to synchronize the `Store::Slices` with the new buffer, `Htx::push_left` is called with the
+In order to synchronize the `Store::Slices` with the new buffer, `Kawa::push_left` is called with the
 amount of bytes discarded to realigned the data:
 
 ```rs

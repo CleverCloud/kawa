@@ -4,7 +4,7 @@ mod protocol;
 mod storage;
 
 use protocol::{h1, h2};
-use storage::{debug_htx, AsBuffer, Htx, HtxBlockConverter, HtxBuffer, Kind};
+use storage::{debug_kawa, AsBuffer, BlockConverter, Buffer, Kawa, Kind};
 
 impl AsBuffer for &mut [u8] {
     fn as_buffer(&self) -> &[u8] {
@@ -15,90 +15,90 @@ impl AsBuffer for &mut [u8] {
     }
 }
 
-fn test_with_converter<T: AsBuffer, C: HtxBlockConverter<T>>(
-    htx_kind: Kind,
-    storage: HtxBuffer<T>,
+fn test_with_converter<T: AsBuffer, C: BlockConverter<T>>(
+    kind: Kind,
+    storage: Buffer<T>,
     fragment: &[u8],
     converter: &mut C,
 ) -> T {
-    let mut htx = Htx::new(htx_kind, storage);
-    let _ = htx.storage.write(fragment).expect("WRITE");
-    debug_htx(&htx);
+    let mut kawa = Kawa::new(kind, storage);
+    let _ = kawa.storage.write(fragment).expect("WRITE");
+    debug_kawa(&kawa);
 
-    h1::parse(&mut htx, &mut h1::NoCallbacks);
-    debug_htx(&htx);
+    h1::parse(&mut kawa, &mut h1::NoCallbacks);
+    debug_kawa(&kawa);
 
-    htx.prepare(converter);
-    debug_htx(&htx);
+    kawa.prepare(converter);
+    debug_kawa(&kawa);
 
-    let out = htx.as_io_slice();
+    let out = kawa.as_io_slice();
     println!("{out:?}");
     let mut writer = std::io::BufWriter::new(Vec::new());
     let amount = writer.write_vectored(&out).expect("WRITE");
     let result = unsafe { std::str::from_utf8_unchecked(writer.buffer()) };
     println!("===============================\n{result}\n===============================");
 
-    let buffer = unsafe { std::str::from_utf8_unchecked(htx.storage.used()) };
+    let buffer = unsafe { std::str::from_utf8_unchecked(kawa.storage.used()) };
     println!("===============================\n{buffer}\n===============================");
 
-    htx.consume(amount);
+    kawa.consume(amount);
     println!("{amount}");
-    debug_htx(&htx);
-    htx.storage.buffer
+    debug_kawa(&kawa);
+    kawa.storage.buffer
 }
-fn test<T: AsBuffer>(htx_kind: Kind, storage: T, fragment: &[u8]) -> T {
-    let htx_buffer = HtxBuffer::new(storage);
-    let storage = test_with_converter(htx_kind, htx_buffer, fragment, &mut h1::BlockConverter);
-    let htx_buffer = HtxBuffer::new(storage);
-    let storage = test_with_converter(htx_kind, htx_buffer, fragment, &mut h2::BlockConverter);
+fn test<T: AsBuffer>(kind: Kind, storage: T, fragment: &[u8]) -> T {
+    let buffer = Buffer::new(storage);
+    let storage = test_with_converter(kind, buffer, fragment, &mut h1::BlockConverter);
+    let buffer = Buffer::new(storage);
+    let storage = test_with_converter(kind, buffer, fragment, &mut h2::BlockConverter);
     storage
 }
 
-fn test_partial_with_converter<T: AsBuffer, C: HtxBlockConverter<T>>(
-    htx_kind: Kind,
-    storage: HtxBuffer<T>,
+fn test_partial_with_converter<T: AsBuffer, C: BlockConverter<T>>(
+    kind: Kind,
+    storage: Buffer<T>,
     mut fragments: Vec<&[u8]>,
     converter: &mut C,
 ) -> T {
     let mut writer = std::io::BufWriter::new(Vec::new());
-    let mut htx = Htx::new(htx_kind, storage);
+    let mut kawa = Kawa::new(kind, storage);
 
     while !fragments.is_empty() {
         let fragment = fragments.remove(0);
-        let _ = htx.storage.write(fragment).expect("WRITE");
+        let _ = kawa.storage.write(fragment).expect("WRITE");
 
-        let buffer = unsafe { std::str::from_utf8_unchecked(htx.storage.used()) };
+        let buffer = unsafe { std::str::from_utf8_unchecked(kawa.storage.used()) };
         println!("===============================\n{buffer}\n===============================");
-        debug_htx(&htx);
+        debug_kawa(&kawa);
 
-        h1::parse(&mut htx, &mut h1::NoCallbacks);
-        debug_htx(&htx);
+        h1::parse(&mut kawa, &mut h1::NoCallbacks);
+        debug_kawa(&kawa);
 
-        htx.prepare(converter);
-        debug_htx(&htx);
+        kawa.prepare(converter);
+        debug_kawa(&kawa);
 
-        let out = htx.as_io_slice();
+        let out = kawa.as_io_slice();
         println!("{out:?}");
         let amount = writer.write_vectored(&out).expect("WRITE");
         println!("{amount:?}");
-        htx.consume(amount);
+        kawa.consume(amount);
 
         let result = unsafe { std::str::from_utf8_unchecked(writer.buffer()) };
         println!("===============================\n{result}\n===============================");
     }
-    debug_htx(&htx);
-    htx.storage.buffer
+    debug_kawa(&kawa);
+    kawa.storage.buffer
 }
-fn test_partial<T: AsBuffer>(htx_kind: Kind, storage: T, fragments: Vec<&[u8]>) -> T {
+fn test_partial<T: AsBuffer>(kind: Kind, storage: T, fragments: Vec<&[u8]>) -> T {
     let storage = test_partial_with_converter(
-        htx_kind,
-        HtxBuffer::new(storage),
+        kind,
+        Buffer::new(storage),
         fragments.clone(),
         &mut h1::BlockConverter,
     );
     let storage = test_partial_with_converter(
-        htx_kind,
-        HtxBuffer::new(storage),
+        kind,
+        Buffer::new(storage),
         fragments,
         &mut h2::BlockConverter,
     );

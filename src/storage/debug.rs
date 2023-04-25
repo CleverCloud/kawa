@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::storage::{
-    AsBuffer, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBuffer, StatusLine, Store,
+    AsBuffer, Block, Buffer, Chunk, ChunkHeader, Flags, Header, Kawa, StatusLine, Store,
 };
 
 fn to_utf8(buf: Option<&[u8]>) -> &str {
@@ -10,16 +10,16 @@ fn to_utf8(buf: Option<&[u8]>) -> &str {
             Ok(str) => str,
             Err(_) => "[ERROR::UTF8]",
         },
-        None => "[ERROR::HTX]",
+        None => "[ERROR::Kawa]",
     }
 }
 
-impl<T: AsBuffer> Htx<T> {
+impl<T: AsBuffer> Kawa<T> {
     pub fn debug(&self, pad: &str) -> Result<String, std::fmt::Error> {
         let buf = self.storage.buffer();
         let mut result = String::new();
         let pad_field = format!("{pad}  ");
-        result.write_fmt(format_args!("HTX {{\n"))?;
+        result.write_fmt(format_args!("Kawa {{\n"))?;
         result.write_fmt(format_args!("{pad}  kind: {:?}", self.kind))?;
         result.write_fmt(format_args!(",\n{pad}  buffer: "))?;
         self.storage.debug(&pad_field, &mut result)?;
@@ -45,12 +45,12 @@ impl<T: AsBuffer> Htx<T> {
         for (i, block) in self.blocks.iter().enumerate() {
             result.write_fmt(format_args!("\n{block_pad}"))?;
             match block {
-                HtxBlock::StatusLine => result.write_fmt(format_args!("StatusLine"))?,
-                HtxBlock::Cookies => result.write_fmt(format_args!("Cookies"))?,
-                HtxBlock::Header(block) => block.debug(buf, &block_pad, &mut result)?,
-                HtxBlock::Chunk(block) => block.debug(buf, &block_pad, &mut result)?,
-                HtxBlock::ChunkHeader(block) => block.debug(buf, &block_pad, &mut result)?,
-                HtxBlock::Flags(block) => block.debug(buf, &block_pad, &mut result)?,
+                Block::StatusLine => result.write_fmt(format_args!("StatusLine"))?,
+                Block::Cookies => result.write_fmt(format_args!("Cookies"))?,
+                Block::Header(block) => block.debug(buf, &block_pad, &mut result)?,
+                Block::Chunk(block) => block.debug(buf, &block_pad, &mut result)?,
+                Block::ChunkHeader(block) => block.debug(buf, &block_pad, &mut result)?,
+                Block::Flags(block) => block.debug(buf, &block_pad, &mut result)?,
             }
             if i == self.blocks.len() - 1 {
                 result.write_fmt(format_args!(",\n{pad}  "))?;
@@ -215,9 +215,9 @@ impl Store {
     }
 }
 
-impl<T: AsBuffer> HtxBuffer<T> {
+impl<T: AsBuffer> Buffer<T> {
     pub fn debug(&self, pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
-        result.write_fmt(format_args!("HtxBuffer {{"))?;
+        result.write_fmt(format_args!("Buffer {{"))?;
         result.write_fmt(format_args!("\n{pad}  start: {}", self.start))?;
         result.write_fmt(format_args!(",\n{pad}  head: {}", self.head))?;
         result.write_fmt(format_args!(",\n{pad}  end: {}", self.end))?;
@@ -227,8 +227,8 @@ impl<T: AsBuffer> HtxBuffer<T> {
     }
 }
 
-pub fn debug_htx<T: AsBuffer>(htx: &Htx<T>) {
-    match htx.debug("") {
+pub fn debug_kawa<T: AsBuffer>(kawa: &Kawa<T>) {
+    match kawa.debug("") {
         Ok(result) => println!("{result}"),
         Err(error) => println!("{error:?}"),
     }

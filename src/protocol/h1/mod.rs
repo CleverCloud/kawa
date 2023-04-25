@@ -1,5 +1,5 @@
 pub mod converter;
 pub mod parser;
 
-pub use converter::BlockConverter;
+pub use converter::H1BlockConverter as BlockConverter;
 pub use parser::{parse, NoCallbacks, ParserCallbacks};

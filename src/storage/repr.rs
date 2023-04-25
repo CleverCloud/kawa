@@ -2,45 +2,45 @@
 use std::rc::Rc;
 use std::{collections::VecDeque, io::IoSlice};
 
-use crate::storage::{AsBuffer, HtxBlockConverter, HtxBuffer};
+use crate::storage::{AsBuffer, BlockConverter, Buffer};
 
 /// Intermediate representation for both H1 and H2 protocols
 ///
 /// /!\ note: the blocks and out fields should always contains "exclusive" data. More specifically
 /// out should always contain "older" data than blocks. This is an invariant of the prepare method.
-pub struct Htx<T: AsBuffer> {
-    pub storage: HtxBuffer<T>,
-    /// Protocol independant representation of the parsed data in the HtxBuffer
-    pub blocks: VecDeque<HtxBlock>,
-    /// Protocol dependant representation generated from the Htx representation in blocks
+pub struct Kawa<T: AsBuffer> {
+    pub storage: Buffer<T>,
+    /// Protocol independant representation of the parsed data in the Buffer
+    pub blocks: VecDeque<Block>,
+    /// Protocol dependant representation generated from the Kawa representation in blocks
     pub out: VecDeque<OutBlock>,
 
-    /// Store the content of specific HtxBlocks away from the "main flow".
-    pub detached: HtxDetachedBlocks,
+    /// Store the content of specific Blocks away from the "main flow".
+    pub detached: DetachedBlocks,
 
     // Those 4 last fields are set and used by external parsers,
-    // Htx doesn't use them directly.
+    // Kawa doesn't use them directly.
     pub kind: Kind,
     pub expects: usize,
     pub parsing_phase: ParsingPhase,
     pub body_size: BodySize,
 }
 
-/// Separate the content of the StatusLine and the crumbs from all the cookies from the HtxBlocks
-/// stream. It allows better indexing, persistance and reordering of data. However it is a double
+/// Separate the content of the StatusLine and the crumbs from all the cookies from the stream of
+/// Blocks. It allows better indexing, persistance and reordering of data. However it is a double
 /// edge sword as it currently enables some unwanted/unsafe behavior such as Slice desync and over
 /// consuming.
-pub struct HtxDetachedBlocks {
+pub struct DetachedBlocks {
     pub status_line: StatusLine,
     pub jar: VecDeque<Store>,
 }
 
-impl<T: AsBuffer> Htx<T> {
-    /// Create a new Htx struct around a given storage.
+impl<T: AsBuffer> Kawa<T> {
+    /// Create a new Kawa struct around a given storage.
     ///
-    /// note: the storage is moved into Htx and shouldn't be directly accessed after that point.
-    /// You can retrieve it right before dropping Htx.
-    pub fn new(kind: Kind, storage: HtxBuffer<T>) -> Self {
+    /// note: the storage is moved into Kawa and shouldn't be directly accessed after that point.
+    /// You can retrieve it right before dropping Kawa.
+    pub fn new(kind: Kind, storage: Buffer<T>) -> Self {
         Self {
             kind,
             blocks: VecDeque::new(),
@@ -49,15 +49,15 @@ impl<T: AsBuffer> Htx<T> {
             parsing_phase: ParsingPhase::StatusLine,
             body_size: BodySize::Empty,
             storage,
-            detached: HtxDetachedBlocks {
+            detached: DetachedBlocks {
                 status_line: StatusLine::Unknown,
                 jar: VecDeque::new(),
             },
         }
     }
 
-    /// Synchronize back all the Stores from blocks and out with the underlying data of HtxBuffer.
-    /// This is necessary after a HtxBuffer::shift.
+    /// Synchronize back all the Stores from blocks and out with the underlying data of Buffer.
+    /// This is necessary after a Buffer::shift.
     pub fn push_left(&mut self, amount: u32) {
         for block in &mut self.blocks {
             block.push_left(amount);
@@ -67,17 +67,17 @@ impl<T: AsBuffer> Htx<T> {
         }
     }
 
-    /// Convert Htx representation from blocks to a protocol specific representation in out.
-    /// HtxBlockConverter takes block one by one and should push Stores in the out vector using
-    /// dedicated push_out method or push_back on the out field. HtxBlockConverter allows to
-    /// implement stateful behavior.
+    /// Convert Kawa representation from Blocks to a protocol specific representation in out.
+    /// BlockConverter takes blocks one by one and should push Stores in the out vector using
+    /// dedicated push_out method or push_back on the out field. BlockConverter allows the
+    /// implementation of stateful behaviors.
     ///
     /// /!\ note: the interface can seem restrictive, but it enforces some invariants, some that
     /// might not be appearant at first.
     ///
     /// note 2: converters can push delimiters in the out vector (via push_delimiter) to fragment
     /// the "stream". This can be used to split H2 frames.
-    pub fn prepare<C: HtxBlockConverter<T>>(&mut self, converter: &mut C) {
+    pub fn prepare<C: BlockConverter<T>>(&mut self, converter: &mut C) {
         converter.initialize(self);
         while let Some(block) = self.blocks.pop_front() {
             converter.call(block, self);
@@ -88,7 +88,7 @@ impl<T: AsBuffer> Htx<T> {
     /// Return a vector of IoSlices collecting every bytes from the out vector up to its end or a
     /// delimiter: OutBlock::Delimiter. This can be used to split H2 frames.
     ///
-    /// note: until you drop the resulting vector, Rust will prevent mutably borrowing Htx as the
+    /// note: until you drop the resulting vector, Rust will prevent mutably borrowing Kawa as the
     /// IoSlices keep a reference in the out vector. As always, nothing is copied.
     pub fn as_io_slice(&mut self) -> Vec<IoSlice> {
         self.out
@@ -105,7 +105,7 @@ impl<T: AsBuffer> Htx<T> {
     }
 
     /// Given an amount of bytes consumed, this method removes the relevant OutBlocks from the out
-    /// vector and truncates any partially consumed block. It manages the underlying HtxBuffer,
+    /// vector and truncates any partially consumed block. It manages the underlying Buffer,
     /// shifting and synchronizing the data if it deems appropriate.
     ///
     /// note: this function assumes blocks is empty! To respect this invariant you should always
@@ -131,8 +131,8 @@ impl<T: AsBuffer> Htx<T> {
         }
     }
 
-    /// Returns how much leading bytes from the HtxBuffer are useless, meaning not referenced by
-    /// any Store. It measures how much memory could be saved by shifting the HtxBuffer. It can
+    /// Returns how much leading bytes from the Buffer are useless, meaning not referenced by
+    /// any Store. It measures how much memory could be saved by shifting the Buffer. It can
     /// be used for monitoring, but it's intended use is internal only.
     pub fn leftmost_ref(&self) -> usize {
         for store in &self.out {
@@ -144,7 +144,7 @@ impl<T: AsBuffer> Htx<T> {
     }
 
     #[allow(dead_code)]
-    pub fn push_block(&mut self, block: HtxBlock) {
+    pub fn push_block(&mut self, block: Block) {
         self.blocks.push_back(block)
     }
     pub fn push_out(&mut self, store: Store) {
@@ -187,7 +187,7 @@ impl<T: AsBuffer> Htx<T> {
         self.blocks.is_empty() && self.out.is_empty()
     }
 
-    /// Completely reset the Htx state and storage.
+    /// Completely reset the Kawa state and storage.
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.storage.clear();
@@ -212,7 +212,7 @@ pub enum ParsingPhase {
     StatusLine,
     Headers,
     Body,
-    /// The "first" field is not directly used by Htx, it is intended for parsers, mainly H1
+    /// The "first" field is not directly used by Kawa, it is intended for parsers, mainly H1
     /// parsers that can benefit from distinguishing the start of the first chunk from the others.
     Chunks {
         first: bool,
@@ -230,7 +230,7 @@ pub enum BodySize {
 }
 
 #[derive(Debug)]
-pub enum HtxBlock {
+pub enum Block {
     StatusLine,
     Header(Header),
     Cookies,
@@ -239,23 +239,23 @@ pub enum HtxBlock {
     Flags(Flags),
 }
 
-impl HtxBlock {
+impl Block {
     pub fn push_left(&mut self, amount: u32) {
         match self {
-            HtxBlock::StatusLine | HtxBlock::Cookies => {
+            Block::StatusLine | Block::Cookies => {
                 unimplemented!();
             }
-            HtxBlock::Header(header) => {
+            Block::Header(header) => {
                 header.key.push_left(amount);
                 header.val.push_left(amount);
             }
-            HtxBlock::ChunkHeader(header) => {
+            Block::ChunkHeader(header) => {
                 header.length.push_left(amount);
             }
-            HtxBlock::Chunk(chunk) => {
+            Block::Chunk(chunk) => {
                 chunk.data.push_left(amount);
             }
-            HtxBlock::Flags(_) => {}
+            Block::Flags(_) => {}
         }
     }
 }

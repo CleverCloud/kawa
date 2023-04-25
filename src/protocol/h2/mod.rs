@@ -1,3 +1,3 @@
 pub mod converter;
 
-pub use converter::BlockConverter;
+pub use converter::H2BlockConverter as BlockConverter;

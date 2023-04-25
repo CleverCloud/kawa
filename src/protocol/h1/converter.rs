@@ -1,9 +1,9 @@
 use crate::storage::{
-    AsBuffer, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, HtxBlockConverter, OutBlock,
-    StatusLine, Store, Version,
+    AsBuffer, Block, BlockConverter, Chunk, ChunkHeader, Flags, Header, Kawa, OutBlock, StatusLine,
+    Store, Version,
 };
 
-pub struct BlockConverter;
+pub struct H1BlockConverter;
 
 impl Version {
     fn as_store(&self) -> Store {
@@ -15,10 +15,10 @@ impl Version {
     }
 }
 
-impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
-    fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
+impl<T: AsBuffer> BlockConverter<T> for H1BlockConverter {
+    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) {
         match block {
-            HtxBlock::StatusLine => match htx.detached.status_line.pop() {
+            Block::StatusLine => match kawa.detached.status_line.pop() {
                 StatusLine::Request {
                     version,
                     method,
@@ -26,14 +26,14 @@ impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
                     authority,
                     ..
                 } => {
-                    htx.push_out(method);
-                    htx.push_out(Store::Static(b" "));
-                    htx.push_out(uri);
-                    htx.push_out(Store::Static(b" "));
-                    htx.push_out(version.as_store());
-                    htx.push_out(Store::Static(b"\r\nHost: "));
-                    htx.push_out(authority);
-                    htx.push_out(Store::Static(b"\r\n"));
+                    kawa.push_out(method);
+                    kawa.push_out(Store::Static(b" "));
+                    kawa.push_out(uri);
+                    kawa.push_out(Store::Static(b" "));
+                    kawa.push_out(version.as_store());
+                    kawa.push_out(Store::Static(b"\r\nHost: "));
+                    kawa.push_out(authority);
+                    kawa.push_out(Store::Static(b"\r\n"));
                 }
                 StatusLine::Response {
                     version,
@@ -41,55 +41,55 @@ impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
                     reason,
                     ..
                 } => {
-                    htx.push_out(version.as_store());
-                    htx.push_out(Store::Static(b" "));
-                    htx.push_out(status);
-                    htx.push_out(Store::Static(b" "));
-                    htx.push_out(reason);
-                    htx.push_out(Store::Static(b"\r\n"));
+                    kawa.push_out(version.as_store());
+                    kawa.push_out(Store::Static(b" "));
+                    kawa.push_out(status);
+                    kawa.push_out(Store::Static(b" "));
+                    kawa.push_out(reason);
+                    kawa.push_out(Store::Static(b"\r\n"));
                 }
                 StatusLine::Unknown => unreachable!(),
             },
-            HtxBlock::Cookies => {
-                if htx.detached.jar.is_empty() {
+            Block::Cookies => {
+                if kawa.detached.jar.is_empty() {
                     return;
                 }
-                htx.push_out(Store::Static(b"Cookies: "));
-                for cookie in htx.detached.jar.drain(..) {
-                    htx.out.push_back(OutBlock::Store(cookie));
-                    htx.out.push_back(OutBlock::Store(Store::Static(b"; ")));
+                kawa.push_out(Store::Static(b"Cookies: "));
+                for cookie in kawa.detached.jar.drain(..) {
+                    kawa.out.push_back(OutBlock::Store(cookie));
+                    kawa.out.push_back(OutBlock::Store(Store::Static(b"; ")));
                 }
-                htx.push_out(Store::Static(b"\r\n"));
+                kawa.push_out(Store::Static(b"\r\n"));
             }
-            HtxBlock::Header(Header {
+            Block::Header(Header {
                 key: Store::Empty, ..
             }) => {
                 // elided header
             }
-            HtxBlock::Header(Header { key, val }) => {
-                htx.push_out(key);
-                htx.push_out(Store::Static(b": "));
-                htx.push_out(val);
-                htx.push_out(Store::Static(b"\r\n"));
+            Block::Header(Header { key, val }) => {
+                kawa.push_out(key);
+                kawa.push_out(Store::Static(b": "));
+                kawa.push_out(val);
+                kawa.push_out(Store::Static(b"\r\n"));
             }
-            HtxBlock::ChunkHeader(ChunkHeader { length }) => {
-                htx.push_out(length);
-                htx.push_out(Store::Static(b"\r\n"));
+            Block::ChunkHeader(ChunkHeader { length }) => {
+                kawa.push_out(length);
+                kawa.push_out(Store::Static(b"\r\n"));
             }
-            HtxBlock::Chunk(Chunk { data }) => {
-                htx.push_out(data);
+            Block::Chunk(Chunk { data }) => {
+                kawa.push_out(data);
             }
-            HtxBlock::Flags(Flags {
+            Block::Flags(Flags {
                 end_body,
                 end_chunk,
                 end_header,
                 ..
             }) => {
-                if htx.is_streaming() && end_body {
-                    htx.push_out(Store::Static(b"0\r\n"));
+                if kawa.is_streaming() && end_body {
+                    kawa.push_out(Store::Static(b"0\r\n"));
                 }
                 if end_header || end_chunk {
-                    htx.push_out(Store::Static(b"\r\n"));
+                    kawa.push_out(Store::Static(b"\r\n"));
                 }
             }
         }

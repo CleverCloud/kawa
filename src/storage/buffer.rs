@@ -1,15 +1,15 @@
 use std::{cmp::min, io, ptr};
 
-/// AsBuffer is the trait used by HtxBuffer to oparate on an arbitrary buffer.
-/// This is to allow the user to use Htx over any type as long as it exposes a continious slice
+/// AsBuffer is the trait used by Buffer to oparate on an arbitrary buffer.
+/// This is to allow the user to use Kawa over any type as long as it exposes a continious slice
 /// of bytes. The previous solution directly used a slice of bytes but it introduces lifetimes.
-/// In this approach HtxBuffer owns the underlying buffer.
+/// In this approach Buffer owns the underlying buffer.
 pub trait AsBuffer {
     fn as_buffer(&self) -> &[u8];
     fn as_mut_buffer(&mut self) -> &mut [u8];
 }
 
-/// HtxBuffer is a pseudo ring buffer specifically designed to store data being parsed
+/// Buffer is a pseudo ring buffer specifically designed to store data being parsed
 /// ```
 /// buffer        start   half     head  end   len
 /// v             v       v         v     v     v
@@ -44,14 +44,14 @@ pub trait AsBuffer {
 /// v        v            v                     v
 /// [        |            :                     ]
 /// ```
-pub struct HtxBuffer<T: AsBuffer> {
+pub struct Buffer<T: AsBuffer> {
     pub start: usize,
     pub head: usize,
     pub end: usize,
     pub buffer: T,
 }
 
-impl<T: AsBuffer> HtxBuffer<T> {
+impl<T: AsBuffer> Buffer<T> {
     pub fn new(buffer: T) -> Self {
         Self {
             start: 0,
@@ -178,7 +178,7 @@ impl<T: AsBuffer> HtxBuffer<T> {
     }
 }
 
-impl<T: AsBuffer> io::Write for HtxBuffer<T> {
+impl<T: AsBuffer> io::Write for Buffer<T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.space().write(buf) {
             Ok(size) => {
@@ -194,7 +194,7 @@ impl<T: AsBuffer> io::Write for HtxBuffer<T> {
     }
 }
 
-impl<T: AsBuffer> io::Read for HtxBuffer<T> {
+impl<T: AsBuffer> io::Read for Buffer<T> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let len = min(self.available_data(), buf.len());
         unsafe {
