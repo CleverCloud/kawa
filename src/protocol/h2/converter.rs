@@ -1,7 +1,8 @@
 use crate::{
     protocol::utils::compare_no_case,
     storage::{
-        AsBuffer, Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, StatusLine, Store,
+        AsBuffer, Chunk, Flags, Header, Htx, HtxBlock, HtxBlockConverter, OutBlock, StatusLine,
+        Store,
     },
 };
 
@@ -10,25 +11,40 @@ pub struct BlockConverter;
 impl<T: AsBuffer> HtxBlockConverter<T> for BlockConverter {
     fn call(&mut self, block: HtxBlock, htx: &mut Htx<T>) {
         match block {
-            HtxBlock::StatusLine(StatusLine::Request {
-                method,
-                authority,
-                path,
-                ..
-            }) => {
-                htx.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
-                htx.push_out(Store::Static(b":method: "));
-                htx.push_out(method);
-                htx.push_out(Store::Static(b"\n:authority: "));
-                htx.push_out(authority);
-                htx.push_out(Store::Static(b"\n:path: "));
-                htx.push_out(path);
-                htx.push_out(Store::Static(b"\n:scheme: http\n"));
-            }
-            HtxBlock::StatusLine(StatusLine::Response { status, .. }) => {
-                htx.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
-                htx.push_out(Store::Static(b":status: "));
-                htx.push_out(status);
+            HtxBlock::StatusLine => match htx.detached.status_line.pop() {
+                StatusLine::Request {
+                    method,
+                    authority,
+                    path,
+                    ..
+                } => {
+                    htx.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
+                    htx.push_out(Store::Static(b":method: "));
+                    htx.push_out(method);
+                    htx.push_out(Store::Static(b"\n:authority: "));
+                    htx.push_out(authority);
+                    htx.push_out(Store::Static(b"\n:path: "));
+                    htx.push_out(path);
+                    htx.push_out(Store::Static(b"\n:scheme: http\n"));
+                }
+                StatusLine::Response { status, .. } => {
+                    htx.push_out(Store::Static(b"------------ PSEUDO HEADER\n"));
+                    htx.push_out(Store::Static(b":status: "));
+                    htx.push_out(status);
+                    htx.push_out(Store::Static(b"\n"));
+                }
+                StatusLine::Unknown => unreachable!(),
+            },
+            HtxBlock::Cookies => {
+                if htx.detached.jar.is_empty() {
+                    return;
+                }
+                htx.push_out(Store::Static(b"------------ HEADER"));
+                for cookie in htx.detached.jar.drain(..) {
+                    htx.out
+                        .push_back(OutBlock::Store(Store::Static(b"\nCookies: ")));
+                    htx.out.push_back(OutBlock::Store(cookie));
+                }
                 htx.push_out(Store::Static(b"\n"));
             }
             HtxBlock::Header(Header {

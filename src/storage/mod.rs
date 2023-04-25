@@ -5,8 +5,8 @@ pub mod repr;
 pub use buffer::{AsBuffer, HtxBuffer};
 pub use debug::debug_htx;
 pub use repr::{
-    BodySize, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, Kind, ParsingPhase, StatusLine,
-    Store, Version,
+    BodySize, Chunk, ChunkHeader, Flags, Header, Htx, HtxBlock, Kind, OutBlock, ParsingPhase,
+    StatusLine, Store, Version,
 };
 
 pub trait HtxBlockConverter<T: AsBuffer> {

@@ -1,7 +1,11 @@
 [package]
 name = "htx"
-version = "0.3.1"
+version = "0.4.1"
 edition = "2021"
 
 [dependencies]
 nom = "7.1.3"
+
+[features]
+# default = ["rc-alloc"]
+rc-alloc = []

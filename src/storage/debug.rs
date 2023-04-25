@@ -26,12 +26,27 @@ impl<T: AsBuffer> Htx<T> {
         result.write_fmt(format_args!(",\n{pad}  expects: {}", self.expects))?;
         result.write_fmt(format_args!(",\n{pad}  phase: {:?}", self.parsing_phase))?;
         result.write_fmt(format_args!(",\n{pad}  body_size: {:?}", self.body_size))?;
-        result.write_fmt(format_args!(",\n{pad}  blocks: ["))?;
+        result.write_fmt(format_args!(",\n{pad}  status_line: "))?;
+        self.detached
+            .status_line
+            .debug(buf, &pad_field, &mut result)?;
         let block_pad = format!("{pad}    ");
+        result.write_fmt(format_args!(",\n{pad}  jar: ["))?;
+        for (i, cookie) in self.detached.jar.iter().enumerate() {
+            result.write_fmt(format_args!("\n{block_pad}"))?;
+            cookie.debug(buf, &block_pad, &mut result)?;
+            if i == self.detached.jar.len() - 1 {
+                result.write_fmt(format_args!(",\n{pad}  "))?;
+            } else {
+                result.write_fmt(format_args!(","))?;
+            }
+        }
+        result.write_fmt(format_args!("],\n{pad}  blocks: ["))?;
         for (i, block) in self.blocks.iter().enumerate() {
             result.write_fmt(format_args!("\n{block_pad}"))?;
             match block {
-                HtxBlock::StatusLine(block) => block.debug(buf, &block_pad, &mut result)?,
+                HtxBlock::StatusLine => result.write_fmt(format_args!("StatusLine"))?,
+                HtxBlock::Cookies => result.write_fmt(format_args!("Cookies"))?,
                 HtxBlock::Header(block) => block.debug(buf, &block_pad, &mut result)?,
                 HtxBlock::Chunk(block) => block.debug(buf, &block_pad, &mut result)?,
                 HtxBlock::ChunkHeader(block) => block.debug(buf, &block_pad, &mut result)?,
@@ -101,6 +116,7 @@ impl StatusLine {
                 reason.debug(buf, &pad_field, result)?;
                 result.write_fmt(format_args!(",\n{pad}}}"))?;
             }
+            StatusLine::Unknown => result.write_fmt(format_args!("StatusLine::Unknown"))?,
         }
         Ok(())
     }
@@ -187,7 +203,7 @@ impl Store {
             Store::Static(data) => {
                 result.write_fmt(format_args!("Store::Static({:?})", to_utf8(Some(data))))?;
             }
-            Store::Vec(data, index) => {
+            Store::Alloc(data, index) => {
                 result.write_fmt(format_args!(
                     "Store::Vec({:?}, {:?})",
                     to_utf8(Some(&data[..*index as usize])),

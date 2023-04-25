@@ -1,6 +1,6 @@
 use nom::{
     bytes::{
-        complete::take_while,
+        complete::{take_while, take_while1},
         streaming::{tag, take},
     },
     character::{
@@ -154,6 +154,27 @@ pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Header>
             val: Store::new_slice(buffer, val),
         },
     ))
+}
+
+fn is_single_crumb_char(i: u8) -> bool {
+    i != 59
+}
+
+/// parse a single crumb from a Cookie header
+///
+/// examples:
+/// ```txt
+/// crumb          -> "crumb"
+/// crumb1; crumb2 -> "crumb1"
+/// ```
+pub fn parse_single_crumb<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Store> {
+    let (i, value) = take_while1(is_single_crumb_char)(i)?;
+    let value = Store::new_slice(buffer, value);
+    if i.is_empty() {
+        return Ok((i, value));
+    }
+    let (i, _) = tag(b"; ")(i)?;
+    Ok((i, value))
 }
 
 pub fn chunk_size(i: &[u8]) -> IResult<&[u8], (&[u8], usize)> {

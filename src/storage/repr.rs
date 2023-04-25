@@ -1,3 +1,5 @@
+#[cfg(feature = "rc-alloc")]
+use std::rc::Rc;
 use std::{collections::VecDeque, io::IoSlice};
 
 use crate::storage::{AsBuffer, HtxBlockConverter, HtxBuffer};
@@ -13,12 +15,24 @@ pub struct Htx<T: AsBuffer> {
     /// Protocol dependant representation generated from the Htx representation in blocks
     pub out: VecDeque<OutBlock>,
 
+    /// Store the content of specific HtxBlocks away from the "main flow".
+    pub detached: HtxDetachedBlocks,
+
     // Those 4 last fields are set and used by external parsers,
     // Htx doesn't use them directly.
     pub kind: Kind,
     pub expects: usize,
     pub parsing_phase: ParsingPhase,
     pub body_size: BodySize,
+}
+
+/// Separate the content of the StatusLine and the crumbs from all the cookies from the HtxBlocks
+/// stream. It allows better indexing, persistance and reordering of data. However it is a double
+/// edge sword as it currently enables some unwanted/unsafe behavior such as Slice desync and over
+/// consuming.
+pub struct HtxDetachedBlocks {
+    pub status_line: StatusLine,
+    pub jar: VecDeque<Store>,
 }
 
 impl<T: AsBuffer> Htx<T> {
@@ -35,6 +49,10 @@ impl<T: AsBuffer> Htx<T> {
             parsing_phase: ParsingPhase::StatusLine,
             body_size: BodySize::Empty,
             storage,
+            detached: HtxDetachedBlocks {
+                status_line: StatusLine::Unknown,
+                jar: VecDeque::new(),
+            },
         }
     }
 
@@ -89,7 +107,11 @@ impl<T: AsBuffer> Htx<T> {
     /// Given an amount of bytes consumed, this method removes the relevant OutBlocks from the out
     /// vector and truncates any partially consumed block. It manages the underlying HtxBuffer,
     /// shifting and synchronizing the data if it deems appropriate.
+    ///
+    /// note: this function assumes blocks is empty! To respect this invariant you should always
+    /// call prepare before consume
     pub fn consume(&mut self, mut amount: usize) {
+        assert!(self.blocks.is_empty());
         while let Some(store) = self.out.pop_front() {
             let (remaining, store) = store.consume(amount);
             amount = remaining;
@@ -162,9 +184,7 @@ impl<T: AsBuffer> Htx<T> {
 
     #[allow(dead_code)]
     pub fn is_completed(&self) -> bool {
-        self.parsing_phase == ParsingPhase::Terminated
-            && self.blocks.is_empty()
-            && self.out.is_empty()
+        self.blocks.is_empty() && self.out.is_empty()
     }
 
     /// Completely reset the Htx state and storage.
@@ -173,6 +193,8 @@ impl<T: AsBuffer> Htx<T> {
         self.storage.clear();
         self.blocks.clear();
         self.out.clear();
+        self.detached.jar.clear();
+        self.detached.status_line = StatusLine::Unknown;
         self.expects = 0;
         self.parsing_phase = ParsingPhase::StatusLine;
         self.body_size = BodySize::Empty;
@@ -209,8 +231,9 @@ pub enum BodySize {
 
 #[derive(Debug)]
 pub enum HtxBlock {
-    StatusLine(StatusLine),
+    StatusLine,
     Header(Header),
+    Cookies,
     ChunkHeader(ChunkHeader),
     Chunk(Chunk),
     Flags(Flags),
@@ -219,21 +242,8 @@ pub enum HtxBlock {
 impl HtxBlock {
     pub fn push_left(&mut self, amount: u32) {
         match self {
-            HtxBlock::StatusLine(StatusLine::Request {
-                method,
-                authority,
-                path,
-                uri,
-                ..
-            }) => {
-                method.push_left(amount);
-                authority.push_left(amount);
-                path.push_left(amount);
-                uri.push_left(amount);
-            }
-            HtxBlock::StatusLine(StatusLine::Response { status, reason, .. }) => {
-                status.push_left(amount);
-                reason.push_left(amount);
+            HtxBlock::StatusLine | HtxBlock::Cookies => {
+                unimplemented!();
             }
             HtxBlock::Header(header) => {
                 header.key.push_left(amount);
@@ -250,8 +260,9 @@ impl HtxBlock {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StatusLine {
+    Unknown,
     Request {
         version: Version,
         method: Store,
@@ -265,6 +276,36 @@ pub enum StatusLine {
         status: Store,
         reason: Store,
     },
+}
+
+impl StatusLine {
+    #[allow(dead_code)]
+    pub fn pop(&mut self) -> StatusLine {
+        match self {
+            StatusLine::Request { version, .. } => {
+                let mut owned = StatusLine::Request {
+                    version: *version,
+                    method: Store::Empty,
+                    authority: Store::Empty,
+                    path: Store::Empty,
+                    uri: Store::Empty,
+                };
+                std::mem::swap(self, &mut owned);
+                owned
+            }
+            StatusLine::Response { version, code, .. } => {
+                let mut owned = StatusLine::Response {
+                    version: *version,
+                    code: *code,
+                    status: Store::Empty,
+                    reason: Store::Empty,
+                };
+                std::mem::swap(self, &mut owned);
+                owned
+            }
+            StatusLine::Unknown => StatusLine::Unknown,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -319,14 +360,17 @@ impl OutBlock {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Store {
     Empty,
     Slice(Slice),
     #[allow(dead_code)]
     Deported(Slice),
     Static(&'static [u8]),
-    Vec(Box<[u8]>, u32),
+    #[cfg(feature = "rc-alloc")]
+    Alloc(Rc<[u8]>, u32),
+    #[cfg(not(feature = "rc-alloc"))]
+    Alloc(Box<[u8]>, u32),
 }
 
 impl Store {
@@ -335,12 +379,14 @@ impl Store {
     }
 
     pub fn new_vec(data: &[u8]) -> Store {
-        Store::Vec(data.to_vec().into_boxed_slice(), 0)
+        #[allow(clippy::useless_conversion)]
+        Store::Alloc(data.to_vec().into_boxed_slice().into(), 0)
     }
 
     #[allow(dead_code)]
     pub fn from_string(data: String) -> Store {
-        Store::Vec(data.into_bytes().into_boxed_slice(), 0)
+        #[allow(clippy::useless_conversion)]
+        Store::Alloc(data.into_bytes().into_boxed_slice().into(), 0)
     }
 
     pub fn push_left(&mut self, amount: u32) {
@@ -364,7 +410,7 @@ impl Store {
             Store::Empty => unreachable!(),
             Store::Slice(slice) | Store::Deported(slice) => slice.data(buf).expect("DATA"),
             Store::Static(data) => data,
-            Store::Vec(data, index) => &data[*index as usize..],
+            Store::Alloc(data, index) => &data[*index as usize..],
         }
     }
     #[allow(dead_code)]
@@ -373,30 +419,30 @@ impl Store {
             Store::Empty => None,
             Store::Slice(slice) | Store::Deported(slice) => slice.data(buf),
             Store::Static(data) => Some(data),
-            Store::Vec(data, index) => Some(&data[*index as usize..]),
+            Store::Alloc(data, index) => Some(&data[*index as usize..]),
         }
     }
 
     #[allow(dead_code)]
-    pub fn capture<'a>(&'a mut self, buf: &'a [u8]) {
+    pub fn capture(self, buf: &[u8]) -> Store {
         match self {
             Store::Slice(slice) | Store::Deported(slice) => {
-                *self = Store::new_vec(slice.data(buf).expect("DATA"));
+                Store::new_vec(slice.data(buf).expect("DATA"))
             }
-            _ => {}
+            _ => self,
         }
     }
 
     #[allow(dead_code)]
     pub fn modify(&mut self, buf: &mut [u8], new_value: &[u8]) {
         match &self {
-            Store::Empty | Store::Deported(_) | Store::Static(_) | Store::Vec(..) => {
+            Store::Empty | Store::Deported(_) | Store::Static(_) | Store::Alloc(..) => {
                 println!("WARNING: modification is not expected on: {self:?}")
             }
             Store::Slice(_) => {}
         }
         match self {
-            Store::Empty | Store::Static(_) | Store::Vec(..) => *self = Store::new_vec(new_value),
+            Store::Empty | Store::Static(_) | Store::Alloc(..) => *self = Store::new_vec(new_value),
             Store::Slice(slice) | Store::Deported(slice) => {
                 let new_len = new_value.len();
                 if slice.len() >= new_len {
@@ -429,11 +475,11 @@ impl Store {
                     (0, Some(Store::Static(&data[amount..])))
                 }
             }
-            Store::Vec(data, index) => {
+            Store::Alloc(data, index) => {
                 if amount >= data.len() - index as usize {
                     (amount - data.len() + index as usize, None)
                 } else {
-                    (0, Some(Store::Vec(data, index + amount as u32)))
+                    (0, Some(Store::Alloc(data, index + amount as u32)))
                 }
             }
         }
@@ -491,6 +537,7 @@ impl Slice {
         }
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len as usize
     }
@@ -499,6 +546,7 @@ impl Slice {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum Version {
+    Unknown,
     V10,
     V11,
     V20,

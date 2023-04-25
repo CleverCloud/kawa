@@ -121,9 +121,11 @@ User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
 Host: www.tutorialspoint.com\r
 Content-Type: application/x-www-form-urlencoded\r
 Content-Length: 49\r
+Cookies: crumb1\r
 Accept-Language: en-us\r
 Accept-Encoding: gzip, deflate\r
 Connection: Keep-Alive\r
+Cookies: crumb2; crumb3\r
 \r
 licenseID=string&content=string&/paramsXML=string",
     );
