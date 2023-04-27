@@ -10,7 +10,7 @@ pub trait AsBuffer {
 }
 
 /// Buffer is a pseudo ring buffer specifically designed to store data being parsed
-/// ```
+/// ```ignore
 /// buffer        start   half     head  end   len
 /// v             v       v         v     v     v
 /// [             ████████:██████████░░░░░░     ]
@@ -25,21 +25,21 @@ pub trait AsBuffer {
 /// Data is assumed to be processed from left to right.
 /// When data from the begining of the buffer can be discarded, `start` advances.
 /// When `start` overshoot half the length of the buffer, it means half the buffer is unsued.
-/// ```
+/// ```ignore
 /// buffer             half  start  head  end   len
 /// v                     v  v      v     v     v
 /// [                     :  ████████░░░░░░     ]
 /// ```
 /// At that point the remaining data of the buffer should be shifted.
 /// Shifting the buffer memmoved the available data back at the begining of the buffer.
-/// ```
+/// ```ignore
 /// buffer
 /// start   head  end     half                  len
 /// v       v     v       v                     v
 /// [████████░░░░░░       :                     ]
 /// ```
 /// It is also recommended to shift an empty buffer if `start` is not 0.
-/// ```
+/// ```ignore
 /// buffer   start/end    half                  len
 /// v        v            v                     v
 /// [        |            :                     ]
@@ -101,7 +101,6 @@ impl<T: AsBuffer> Buffer<T> {
         self.start == self.end
     }
 
-    #[allow(dead_code)]
     pub fn is_full(&self) -> bool {
         self.end == self.capacity()
     }
@@ -118,7 +117,6 @@ impl<T: AsBuffer> Buffer<T> {
         count
     }
 
-    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.start = 0;
         self.head = 0;
@@ -133,7 +131,6 @@ impl<T: AsBuffer> Buffer<T> {
         self.buffer.as_mut_buffer()
     }
 
-    #[allow(dead_code)]
     pub fn data(&self) -> &[u8] {
         let range = self.start..self.end;
         &self.buffer()[range]

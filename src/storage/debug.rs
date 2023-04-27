@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use crate::storage::{
-    AsBuffer, Block, Buffer, Chunk, ChunkHeader, Flags, Header, Kawa, StatusLine, Store,
+    AsBuffer, Block, Buffer, Chunk, ChunkHeader, Flags, Kawa, Pair, StatusLine, Store,
 };
 
 fn to_utf8(buf: Option<&[u8]>) -> &str {
@@ -34,7 +34,7 @@ impl<T: AsBuffer> Kawa<T> {
         result.write_fmt(format_args!(",\n{pad}  jar: ["))?;
         for (i, cookie) in self.detached.jar.iter().enumerate() {
             result.write_fmt(format_args!("\n{block_pad}"))?;
-            cookie.debug(buf, &block_pad, &mut result)?;
+            cookie.debug("Cookie", buf, &block_pad, &mut result)?;
             if i == self.detached.jar.len() - 1 {
                 result.write_fmt(format_args!(",\n{pad}  "))?;
             } else {
@@ -47,7 +47,7 @@ impl<T: AsBuffer> Kawa<T> {
             match block {
                 Block::StatusLine => result.write_fmt(format_args!("StatusLine"))?,
                 Block::Cookies => result.write_fmt(format_args!("Cookies"))?,
-                Block::Header(block) => block.debug(buf, &block_pad, &mut result)?,
+                Block::Header(block) => block.debug("Header", buf, &block_pad, &mut result)?,
                 Block::Chunk(block) => block.debug(buf, &block_pad, &mut result)?,
                 Block::ChunkHeader(block) => block.debug(buf, &block_pad, &mut result)?,
                 Block::Flags(block) => block.debug(buf, &block_pad, &mut result)?,
@@ -122,10 +122,16 @@ impl StatusLine {
     }
 }
 
-impl Header {
-    pub fn debug(&self, buf: &[u8], pad: &str, result: &mut String) -> Result<(), std::fmt::Error> {
+impl Pair {
+    pub fn debug(
+        &self,
+        name: &str,
+        buf: &[u8],
+        pad: &str,
+        result: &mut String,
+    ) -> Result<(), std::fmt::Error> {
         let pad_field = format!("{pad}  ");
-        result.write_fmt(format_args!("Header {{"))?;
+        result.write_fmt(format_args!("{name} {{"))?;
         result.write_fmt(format_args!("\n{pad}  key: "))?;
         self.key.debug(buf, &pad_field, result)?;
         result.write_fmt(format_args!(",\n{pad}  val: "))?;
@@ -190,7 +196,7 @@ impl Store {
                 ))?;
                 result.write_fmt(format_args!(",\n{pad}}}"))?;
             }
-            Store::Deported(slice) => {
+            Store::Detached(slice) => {
                 result.write_fmt(format_args!("Store::Deported {{"))?;
                 result.write_fmt(format_args!("\n{pad}  start: {}", slice.start))?;
                 result.write_fmt(format_args!(",\n{pad}  len: {}", slice.len))?;

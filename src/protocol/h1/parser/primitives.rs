@@ -15,7 +15,7 @@ use nom::{
 
 use crate::{
     protocol::utils::compare_no_case,
-    storage::{Header, StatusLine, Store, Version},
+    storage::{Pair, StatusLine, Store, Version},
 };
 
 fn error_position<I, E: ParseError<I>>(i: I, kind: NomErrorKind) -> NomError<E> {
@@ -137,7 +137,7 @@ pub fn parse_response_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], 
 /// parse a HTTP header, including terminating CRLF
 ///
 /// example: `Content-Length: 42\r\n`
-pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Header> {
+pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
     // TODO handle folding?
     let (i, (key, _, _, val, _)) = tuple((
         token,
@@ -149,32 +149,39 @@ pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Header>
 
     Ok((
         i,
-        Header {
+        Pair {
             key: Store::new_slice(buffer, key),
             val: Store::new_slice(buffer, val),
         },
     ))
 }
 
+/// not ";" nor "="
 fn is_single_crumb_char(i: u8) -> bool {
-    i != 59
+    i != 59 && i != 61
 }
 
 /// parse a single crumb from a Cookie header
 ///
 /// examples:
 /// ```txt
-/// crumb          -> "crumb"
-/// crumb1; crumb2 -> "crumb1"
+/// crumb=0          -> ("crumb", "0")
+/// crumb=1; crumb=2 -> ("crumb", "1")
 /// ```
-pub fn parse_single_crumb<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Store> {
-    let (i, value) = take_while1(is_single_crumb_char)(i)?;
-    let value = Store::new_slice(buffer, value);
+pub fn parse_single_crumb<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
+    let (i, (key, _, val)) = tuple((
+        take_while1(is_single_crumb_char),
+        tag(b"="),
+        take_while1(is_single_crumb_char),
+    ))(i)?;
+    let key = Store::new_detached(buffer, key);
+    let val = Store::new_detached(buffer, val);
+    let crumb = Pair { key, val };
     if i.is_empty() {
-        return Ok((i, value));
+        return Ok((i, crumb));
     }
     let (i, _) = tag(b"; ")(i)?;
-    Ok((i, value))
+    Ok((i, crumb))
 }
 
 pub fn chunk_size(i: &[u8]) -> IResult<&[u8], (&[u8], usize)> {

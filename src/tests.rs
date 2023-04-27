@@ -1,10 +1,7 @@
 use std::io::Write;
 
-mod protocol;
-mod storage;
-
-use protocol::{h1, h2};
-use storage::{debug_kawa, AsBuffer, BlockConverter, Buffer, Kawa, Kind};
+use crate::protocol::{h1, h2};
+use crate::storage::{debug_kawa, AsBuffer, BlockConverter, Buffer, Kawa, Kind};
 
 impl AsBuffer for &mut [u8] {
     fn as_buffer(&self) -> &[u8] {
@@ -105,7 +102,8 @@ fn test_partial<T: AsBuffer>(kind: Kind, storage: T, fragments: Vec<&[u8]>) -> T
     storage
 }
 
-fn main() {
+#[test]
+fn tests() {
     let mut buffer = vec![0; 512];
     test(
         Kind::Request,
@@ -121,11 +119,11 @@ User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
 Host: www.tutorialspoint.com\r
 Content-Type: application/x-www-form-urlencoded\r
 Content-Length: 49\r
-Cookies: crumb1\r
+Cookies: crumb=1\r
 Accept-Language: en-us\r
 Accept-Encoding: gzip, deflate\r
 Connection: Keep-Alive\r
-Cookies: crumb2; crumb3\r
+Cookies: crumb=2; crumb=3\r
 \r
 licenseID=string&content=string&/paramsXML=string",
     );

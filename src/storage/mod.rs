@@ -5,7 +5,7 @@ pub mod repr;
 pub use buffer::{AsBuffer, Buffer};
 pub use debug::debug_kawa;
 pub use repr::{
-    Block, BodySize, Chunk, ChunkHeader, Flags, Header, Kawa, Kind, OutBlock, ParsingPhase,
+    Block, BodySize, Chunk, ChunkHeader, Flags, Pair, Kawa, Kind, OutBlock, ParsingPhase,
     StatusLine, Store, Version,
 };
 

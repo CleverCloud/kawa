@@ -56,7 +56,7 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     if let Store::Empty = authority {
                         mem::swap(&mut authority, &mut header.val);
                     }
-                    header.key = Store::Empty; // Host header is elided
+                    header.elide(); // Host header is elided
                 } else if compare_no_case(key, b"content-length") {
                     match kawa.body_size {
                         BodySize::Empty => {}

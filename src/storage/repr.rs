@@ -32,7 +32,7 @@ pub struct Kawa<T: AsBuffer> {
 /// consuming.
 pub struct DetachedBlocks {
     pub status_line: StatusLine,
-    pub jar: VecDeque<Store>,
+    pub jar: VecDeque<Pair>,
 }
 
 impl<T: AsBuffer> Kawa<T> {
@@ -143,7 +143,6 @@ impl<T: AsBuffer> Kawa<T> {
         self.storage.head
     }
 
-    #[allow(dead_code)]
     pub fn push_block(&mut self, block: Block) {
         self.blocks.push_back(block)
     }
@@ -154,7 +153,6 @@ impl<T: AsBuffer> Kawa<T> {
         self.out.push_back(OutBlock::Delimiter)
     }
 
-    #[allow(dead_code)]
     pub fn is_initial(&self) -> bool {
         self.parsing_phase == ParsingPhase::StatusLine
     }
@@ -163,7 +161,6 @@ impl<T: AsBuffer> Kawa<T> {
         matches!(self.body_size, BodySize::Chunked)
     }
 
-    #[allow(dead_code)]
     pub fn is_main_phase(&self) -> bool {
         match self.parsing_phase {
             ParsingPhase::Body
@@ -182,13 +179,11 @@ impl<T: AsBuffer> Kawa<T> {
         self.parsing_phase == ParsingPhase::Terminated
     }
 
-    #[allow(dead_code)]
     pub fn is_completed(&self) -> bool {
         self.blocks.is_empty() && self.out.is_empty()
     }
 
     /// Completely reset the Kawa state and storage.
-    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.storage.clear();
         self.blocks.clear();
@@ -232,7 +227,7 @@ pub enum BodySize {
 #[derive(Debug)]
 pub enum Block {
     StatusLine,
-    Header(Header),
+    Header(Pair),
     Cookies,
     ChunkHeader(ChunkHeader),
     Chunk(Chunk),
@@ -279,7 +274,6 @@ pub enum StatusLine {
 }
 
 impl StatusLine {
-    #[allow(dead_code)]
     pub fn pop(&mut self) -> StatusLine {
         match self {
             StatusLine::Request { version, .. } => {
@@ -309,12 +303,16 @@ impl StatusLine {
 }
 
 #[derive(Debug)]
-pub struct Header {
+pub struct Pair {
     pub key: Store,
     pub val: Store,
 }
 
-impl Header {
+impl Pair {
+    pub fn elide(&mut self) {
+        self.key = Store::Empty;
+    }
+
     pub fn is_elided(&self) -> bool {
         self.key.is_empty()
     }
@@ -364,8 +362,7 @@ impl OutBlock {
 pub enum Store {
     Empty,
     Slice(Slice),
-    #[allow(dead_code)]
-    Deported(Slice),
+    Detached(Slice),
     Static(&'static [u8]),
     #[cfg(feature = "rc-alloc")]
     Alloc(Rc<[u8]>, u32),
@@ -378,12 +375,15 @@ impl Store {
         Store::Slice(Slice::new(buffer, data))
     }
 
+    pub fn new_detached(buffer: &[u8], data: &[u8]) -> Store {
+        Store::Detached(Slice::new(buffer, data))
+    }
+
     pub fn new_vec(data: &[u8]) -> Store {
         #[allow(clippy::useless_conversion)]
         Store::Alloc(data.to_vec().into_boxed_slice().into(), 0)
     }
 
-    #[allow(dead_code)]
     pub fn from_string(data: String) -> Store {
         #[allow(clippy::useless_conversion)]
         Store::Alloc(data.into_bytes().into_boxed_slice().into(), 0)
@@ -394,7 +394,7 @@ impl Store {
             Store::Slice(slice) => {
                 slice.start -= amount;
             }
-            Store::Deported(slice) => {
+            Store::Detached(slice) => {
                 slice.start -= amount;
             }
             _ => {}
@@ -408,42 +408,39 @@ impl Store {
     pub fn data<'a>(&'a self, buf: &'a [u8]) -> &'a [u8] {
         match self {
             Store::Empty => unreachable!(),
-            Store::Slice(slice) | Store::Deported(slice) => slice.data(buf).expect("DATA"),
+            Store::Slice(slice) | Store::Detached(slice) => slice.data(buf).expect("DATA"),
             Store::Static(data) => data,
             Store::Alloc(data, index) => &data[*index as usize..],
         }
     }
-    #[allow(dead_code)]
     pub fn data_opt<'a>(&'a self, buf: &'a [u8]) -> Option<&'a [u8]> {
         match self {
             Store::Empty => None,
-            Store::Slice(slice) | Store::Deported(slice) => slice.data(buf),
+            Store::Slice(slice) | Store::Detached(slice) => slice.data(buf),
             Store::Static(data) => Some(data),
             Store::Alloc(data, index) => Some(&data[*index as usize..]),
         }
     }
 
-    #[allow(dead_code)]
     pub fn capture(self, buf: &[u8]) -> Store {
         match self {
-            Store::Slice(slice) | Store::Deported(slice) => {
+            Store::Slice(slice) | Store::Detached(slice) => {
                 Store::new_vec(slice.data(buf).expect("DATA"))
             }
             _ => self,
         }
     }
 
-    #[allow(dead_code)]
     pub fn modify(&mut self, buf: &mut [u8], new_value: &[u8]) {
         match &self {
-            Store::Empty | Store::Deported(_) | Store::Static(_) | Store::Alloc(..) => {
+            Store::Empty | Store::Detached(_) | Store::Static(_) | Store::Alloc(..) => {
                 println!("WARNING: modification is not expected on: {self:?}")
             }
             Store::Slice(_) => {}
         }
         match self {
             Store::Empty | Store::Static(_) | Store::Alloc(..) => *self = Store::new_vec(new_value),
-            Store::Slice(slice) | Store::Deported(slice) => {
+            Store::Slice(slice) | Store::Detached(slice) => {
                 let new_len = new_value.len();
                 if slice.len() >= new_len {
                     let start = slice.start as usize;
@@ -464,7 +461,7 @@ impl Store {
                 let (remaining, opt) = slice.consume(amount);
                 (remaining, opt.map(Store::Slice))
             }
-            Store::Deported(slice) => {
+            Store::Detached(slice) => {
                 let (remaining, opt) = slice.consume(amount);
                 (remaining, opt.map(Store::Slice))
             }
@@ -543,7 +540,6 @@ impl Slice {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum Version {
     Unknown,

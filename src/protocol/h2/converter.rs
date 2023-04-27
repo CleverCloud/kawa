@@ -1,7 +1,7 @@
 use crate::{
     protocol::utils::compare_no_case,
     storage::{
-        AsBuffer, Block, BlockConverter, Chunk, Flags, Header, Kawa, OutBlock, StatusLine, Store,
+        AsBuffer, Block, BlockConverter, Chunk, Flags, Pair, Kawa, OutBlock, StatusLine, Store,
     },
 };
 
@@ -42,16 +42,18 @@ impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
                 for cookie in kawa.detached.jar.drain(..) {
                     kawa.out
                         .push_back(OutBlock::Store(Store::Static(b"\nCookies: ")));
-                    kawa.out.push_back(OutBlock::Store(cookie));
+                    kawa.out.push_back(OutBlock::Store(cookie.key));
+                    kawa.out.push_back(OutBlock::Store(Store::Static(b"=")));
+                    kawa.out.push_back(OutBlock::Store(cookie.val));
                 }
                 kawa.push_out(Store::Static(b"\n"));
             }
-            Block::Header(Header {
+            Block::Header(Pair {
                 key: Store::Empty, ..
             }) => {
                 // elided header
             }
-            Block::Header(Header { key, val }) => {
+            Block::Header(Pair { key, val }) => {
                 {
                     let key = key.data(kawa.storage.buffer());
                     let val = val.data(kawa.storage.buffer());
