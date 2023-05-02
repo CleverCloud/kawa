@@ -1,10 +1,14 @@
 use nom::{
     bytes::{
-        complete::{take_while, take_while1},
-        streaming::{tag, take},
+        complete::{
+            tag as tag_complete, take_while as take_while_complete,
+            take_while1 as take_while1_complete,
+        },
+        streaming::{tag, take, take_while},
     },
     character::{
-        is_alphanumeric, is_space,
+        complete::char as char_complete,
+        is_space,
         streaming::{char, hex_digit1, one_of},
     },
     combinator::opt,
@@ -22,21 +26,173 @@ fn error_position<I, E: ParseError<I>>(i: I, kind: NomErrorKind) -> NomError<E> 
     NomError::Error(make_error(i, kind))
 }
 
+macro_rules! make_bool_table {
+    ($($v:expr,)*) => ([
+        $($v != 0,)*
+    ])
+}
+
+//////////////////////////////////////////////////
+// STREAMING PARSERS
+//////////////////////////////////////////////////
+
+#[rustfmt::skip]
+const TCHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+#[rustfmt::skip]
+#[allow(dead_code)]
+const VCHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+#[rustfmt::skip]
+const CCHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+#[rustfmt::skip]
+const ACHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
 // Primitives
-fn is_token_char(i: u8) -> bool {
-    is_alphanumeric(i) || b"!#$%&'*+-.^_`|~".contains(&i)
+fn is_tchar(i: u8) -> bool {
+    // is_alphanumeric(i) || b"!#$%&'*+-.^_`|~".contains(&i)
+    // unsafe { *TCHAR_MAP.get_unchecked(i as usize) }
+    TCHAR_MAP[i as usize]
 }
-
 fn token(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_token_char)(i)
+    take_while(is_tchar)(i)
 }
 
-fn is_status_token_char(i: u8) -> bool {
-    i >= 32 && i != 127
+fn is_vchar(i: u8) -> bool {
+    i > 32 && i < 127
+    // VCHAR_MAP[i as usize]
+}
+fn value_token(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while(is_vchar)(i)
 }
 
-fn status_token(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_status_token_char)(i)
+fn is_reason_char(i: u8) -> bool {
+    // i == 9 || (32..=126).contains(&i)
+    ACHAR_MAP[i as usize]
+}
+fn reason_token(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while(is_reason_char)(i)
 }
 
 fn space(i: &[u8]) -> IResult<&[u8], char> {
@@ -45,10 +201,6 @@ fn space(i: &[u8]) -> IResult<&[u8], char> {
 
 pub fn crlf(i: &[u8]) -> IResult<&[u8], &[u8]> {
     tag(b"\r\n")(i)
-}
-
-fn is_vchar(i: u8) -> bool {
-    i > 32 && i <= 126
 }
 
 // allows ISO-8859-1 characters in header values
@@ -61,11 +213,8 @@ fn is_header_value_char(i: u8) -> bool {
 
 #[cfg(not(feature = "tolerant-http1-parser"))]
 fn is_header_value_char(i: u8) -> bool {
-    i == 9 || (32..=126).contains(&i)
-}
-
-fn vchar_1(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_vchar)(i)
+    // i == 9 || (32..=126).contains(&i)
+    ACHAR_MAP[i as usize]
 }
 
 fn http_version(i: &[u8]) -> IResult<&[u8], Version> {
@@ -97,12 +246,8 @@ fn http_status(i: &[u8]) -> IResult<&[u8], (&[u8], u16)> {
 ///
 /// example: `GET www.clever.cloud.com HTTP/1.1\r\n`
 pub fn parse_request_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], StatusLine> {
-    let (i, method) = token(i)?;
-    let (i, _) = space(i)?;
-    let (i, uri) = vchar_1(i)?; // ToDo proper URI parsing?
-    let (i, _) = space(i)?;
-    let (i, version) = http_version(i)?;
-    let (i, _) = crlf(i)?;
+    let (i, (method, _, uri, _, version, _)) =
+        tuple((token, space, value_token, space, http_version, crlf))(i)?;
 
     Ok((
         i,
@@ -121,7 +266,7 @@ pub fn parse_request_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], S
 /// example: `HTTP/1.1 200 OK\r\n`
 pub fn parse_response_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], StatusLine> {
     let (i, (version, _, (status, code), _, reason, _)) =
-        tuple((http_version, space, http_status, space, status_token, crlf))(i)?;
+        tuple((http_version, space, http_status, space, reason_token, crlf))(i)?;
 
     Ok((
         i,
@@ -156,9 +301,119 @@ pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
     ))
 }
 
+//////////////////////////////////////////////////
+// COMPLETE PARSERS
+//////////////////////////////////////////////////
+
+#[rustfmt::skip]
+const SCHEME_CHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+#[rustfmt::skip]
+const AUTHORITY_CHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+#[rustfmt::skip]
+const USERINFO_CHAR_MAP: [bool; 256] = make_bool_table![
+    // Control characters
+// \0                   \a \b \t \n \v \f \r
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+//                                  \e
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    // Visible characters
+// SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
+    0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1,
+//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+//  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+
+    // Non ascii characters
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
 /// not ";" nor "="
-fn is_single_crumb_char(i: u8) -> bool {
-    i != 59 && i != 61
+fn is_single_crumb_key_char(i: u8) -> bool {
+    // i != 59 && i != 61
+    i != 61 && CCHAR_MAP[i as usize]
+}
+
+/// not ";"
+fn is_single_crumb_val_char(i: u8) -> bool {
+    // i != 59
+    CCHAR_MAP[i as usize]
 }
 
 /// parse a single crumb from a Cookie header
@@ -169,18 +424,28 @@ fn is_single_crumb_char(i: u8) -> bool {
 /// crumb=1; crumb=2 -> ("crumb", "1")
 /// ```
 pub fn parse_single_crumb<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
-    let (i, (key, _, val)) = tuple((
-        take_while1(is_single_crumb_char),
-        tag(b"="),
-        take_while1(is_single_crumb_char),
+    let (i, (key, val)) = tuple((
+        take_while_complete(is_single_crumb_key_char),
+        opt(tuple((
+            tag_complete(b"="),
+            take_while_complete(is_single_crumb_val_char),
+        ))),
     ))(i)?;
-    let key = Store::new_detached(buffer, key);
-    let val = Store::new_detached(buffer, val);
-    let crumb = Pair { key, val };
+
+    let crumb = match val {
+        Some((_, val)) => Pair {
+            key: Store::new_detached(buffer, key),
+            val: Store::new_detached(buffer, val),
+        },
+        None => Pair {
+            key: Store::Static(b""),
+            val: Store::new_detached(buffer, key),
+        },
+    };
     if i.is_empty() {
         return Ok((i, crumb));
     }
-    let (i, _) = tag(b"; ")(i)?;
+    let (i, _) = tag_complete(b"; ")(i)?;
     Ok((i, crumb))
 }
 
@@ -189,6 +454,7 @@ pub fn chunk_size(i: &[u8]) -> IResult<&[u8], (&[u8], usize)> {
     let size = std::str::from_utf8(size_hexa)
         .ok()
         .and_then(|chunk_size| usize::from_str_radix(chunk_size, 16).ok());
+
     match size {
         Some(size) => Ok((i, (size_hexa, size))),
         None => Err(error_position(i, NomErrorKind::MapRes)),
@@ -206,16 +472,20 @@ pub fn parse_chunk_header(first: bool, i: &[u8]) -> IResult<&[u8], (&[u8], usize
 }
 
 fn is_scheme_char(i: u8) -> bool {
-    is_alphanumeric(i) || b"+-.".contains(&i)
+    // is_alphanumeric(i) || b"+-.".contains(&i)
+    SCHEME_CHAR_MAP[i as usize]
 }
 fn is_authority_char(i: u8) -> bool {
-    !b"/?#".contains(&i)
+    // !b"/?#".contains(&i)
+    AUTHORITY_CHAR_MAP[i as usize]
 }
 fn is_userinfo_char(i: u8) -> bool {
-    !b"/?#\\@".contains(&i)
+    // !b"/?#\\@".contains(&i)
+    USERINFO_CHAR_MAP[i as usize]
 }
 fn userinfo(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    let (i, (userinfo, _)) = tuple((take_while(is_userinfo_char), tag(b"@")))(i)?;
+    let (i, (userinfo, _)) =
+        tuple((take_while1_complete(is_userinfo_char), char_complete('@')))(i)?;
     Ok((i, userinfo))
 }
 
@@ -254,10 +524,10 @@ fn parse_origin_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store
 /// ```
 fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
     let (path, (_scheme, _, _userinfo, authority)) = tuple((
-        take_while(is_scheme_char),
-        tag(b"://"),
+        take_while1_complete(is_scheme_char),
+        tag_complete(b"://"),
         opt(userinfo),
-        take_while(is_authority_char),
+        take_while1_complete(is_authority_char),
     ))(i)?;
     let authority = Store::new_slice(buffer, authority);
     let path = if path.is_empty() {

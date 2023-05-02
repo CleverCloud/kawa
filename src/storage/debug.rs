@@ -192,7 +192,7 @@ impl Store {
                 result.write_fmt(format_args!(",\n{pad}  len: {}", slice.len))?;
                 result.write_fmt(format_args!(
                     ",\n{pad}  view: {:?}",
-                    to_utf8(slice.data(buf))
+                    to_utf8(slice.data_opt(buf))
                 ))?;
                 result.write_fmt(format_args!(",\n{pad}}}"))?;
             }
@@ -202,7 +202,7 @@ impl Store {
                 result.write_fmt(format_args!(",\n{pad}  len: {}", slice.len))?;
                 result.write_fmt(format_args!(
                     ",\n{pad}  view: {:?}",
-                    to_utf8(slice.data(buf))
+                    to_utf8(slice.data_opt(buf))
                 ))?;
                 result.write_fmt(format_args!(",\n{pad}}}"))?;
             }

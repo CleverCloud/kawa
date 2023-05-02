@@ -1,5 +1,5 @@
 use crate::storage::{
-    AsBuffer, Block, BlockConverter, Chunk, ChunkHeader, Flags, Pair, Kawa, OutBlock, StatusLine,
+    AsBuffer, Block, BlockConverter, Chunk, ChunkHeader, Flags, Kawa, OutBlock, Pair, StatusLine,
     Store, Version,
 };
 
@@ -54,17 +54,21 @@ impl<T: AsBuffer> BlockConverter<T> for H1BlockConverter {
                 if kawa.detached.jar.is_empty() {
                     return;
                 }
-                kawa.push_out(Store::Static(b"Cookies: "));
+                kawa.push_out(Store::Static(b"Cookie: "));
+                let mut first = true;
                 for cookie in kawa
                     .detached
                     .jar
                     .drain(..)
                     .filter(|cookie| !cookie.is_elided())
                 {
+                    if !first {
+                        kawa.out.push_back(OutBlock::Store(Store::Static(b"; ")));
+                        first = false;
+                    }
                     kawa.out.push_back(OutBlock::Store(cookie.key));
                     kawa.out.push_back(OutBlock::Store(Store::Static(b"=")));
                     kawa.out.push_back(OutBlock::Store(cookie.val));
-                    kawa.out.push_back(OutBlock::Store(Store::Static(b"; ")));
                 }
                 kawa.push_out(Store::Static(b"\r\n"));
             }

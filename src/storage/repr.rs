@@ -158,7 +158,7 @@ impl<T: AsBuffer> Kawa<T> {
     }
 
     pub fn is_streaming(&self) -> bool {
-        matches!(self.body_size, BodySize::Chunked)
+        self.body_size == BodySize::Chunked
     }
 
     pub fn is_main_phase(&self) -> bool {
@@ -408,7 +408,7 @@ impl Store {
     pub fn data<'a>(&'a self, buf: &'a [u8]) -> &'a [u8] {
         match self {
             Store::Empty => unreachable!(),
-            Store::Slice(slice) | Store::Detached(slice) => slice.data(buf).expect("DATA"),
+            Store::Slice(slice) | Store::Detached(slice) => slice.data(buf),
             Store::Static(data) => data,
             Store::Alloc(data, index) => &data[*index as usize..],
         }
@@ -416,7 +416,7 @@ impl Store {
     pub fn data_opt<'a>(&'a self, buf: &'a [u8]) -> Option<&'a [u8]> {
         match self {
             Store::Empty => None,
-            Store::Slice(slice) | Store::Detached(slice) => slice.data(buf),
+            Store::Slice(slice) | Store::Detached(slice) => slice.data_opt(buf),
             Store::Static(data) => Some(data),
             Store::Alloc(data, index) => Some(&data[*index as usize..]),
         }
@@ -424,9 +424,7 @@ impl Store {
 
     pub fn capture(self, buf: &[u8]) -> Store {
         match self {
-            Store::Slice(slice) | Store::Detached(slice) => {
-                Store::new_vec(slice.data(buf).expect("DATA"))
-            }
+            Store::Slice(slice) | Store::Detached(slice) => Store::new_vec(slice.data(buf)),
             _ => self,
         }
     }
@@ -493,22 +491,27 @@ impl Slice {
     /// data MUST be a subset of buffer
     pub fn new(buffer: &[u8], data: &[u8]) -> Slice {
         let offset = data.as_ptr() as usize - buffer.as_ptr() as usize;
-        assert!(
-            offset <= u32::MAX as usize,
-            "slices should not start at more than 4GB from its beginning"
-        );
-        assert!(
-            data.len() <= u16::MAX as usize,
-            "slices should not be larger than 65536 bytes"
-        );
-
+        // assert!(
+        //     offset <= u32::MAX as usize,
+        //     "slices should not start at more than 4GB from its beginning"
+        // );
+        // assert!(
+        //     data.len() <= u16::MAX as usize,
+        //     "slices should not be larger than 65536 bytes"
+        // );
         Slice {
             start: offset as u32,
             len: data.len() as u32,
         }
     }
 
-    pub fn data<'a>(&self, buffer: &'a [u8]) -> Option<&'a [u8]> {
+    pub fn data<'a>(&self, buffer: &'a [u8]) -> &'a [u8] {
+        let start = self.start as usize;
+        let end = start + self.len();
+        &buffer[start..end]
+    }
+
+    pub fn data_opt<'a>(&self, buffer: &'a [u8]) -> Option<&'a [u8]> {
         let start = self.start as usize;
         let end = start + self.len();
 

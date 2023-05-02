@@ -1,16 +1,6 @@
 use std::io::Write;
 
-use crate::protocol::{h1, h2};
-use crate::storage::{debug_kawa, AsBuffer, BlockConverter, Buffer, Kawa, Kind};
-
-impl AsBuffer for &mut [u8] {
-    fn as_buffer(&self) -> &[u8] {
-        self
-    }
-    fn as_mut_buffer(&mut self) -> &mut [u8] {
-        self
-    }
-}
+use kawa::{debug_kawa, h1, h2, AsBuffer, BlockConverter, Buffer, Kawa, Kind, SliceBuffer};
 
 fn test_with_converter<T: AsBuffer, C: BlockConverter<T>>(
     kind: Kind,
@@ -107,30 +97,30 @@ fn tests() {
     let mut buffer = vec![0; 512];
     test(
         Kind::Request,
-        &mut buffer[..],
+        SliceBuffer(&mut buffer[..]),
         b"CONNECT www.example.com:80 HTTP/1.1\r\nTE: lol\r\nTE: trailers\r\n\r\n",
     );
 
     test(
         Kind::Request,
-        &mut buffer[..],
+        SliceBuffer(&mut buffer[..]),
         b"POST /cgi-bin/process.cgi HTTP/1.1\r
 User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)\r
 Host: www.tutorialspoint.com\r
 Content-Type: application/x-www-form-urlencoded\r
 Content-Length: 49\r
-Cookies: crumb=1\r
+Cookie: crumb=1\r
 Accept-Language: en-us\r
 Accept-Encoding: gzip, deflate\r
 Connection: Keep-Alive\r
-Cookies: crumb=2; crumb=3\r
+Cookie: crumb=2; crumb=3\r
 \r
 licenseID=string&content=string&/paramsXML=string",
     );
 
     test(
         Kind::Response,
-        &mut buffer[..128],
+        SliceBuffer(&mut buffer[..128]),
         b"HTTP/1.1 200 OK\r
 Transfer-Encoding: chunked\r
 Connection: Keep-Alive\r
@@ -148,7 +138,7 @@ Foo: bar\r
 
     test_partial(
         Kind::Response,
-        &mut buffer[..128],
+        SliceBuffer(&mut buffer[..128]),
         vec![
             b"HTTP/1.1 200 OK\r
 Transfer-Encoding: chunked\r

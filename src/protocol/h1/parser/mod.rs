@@ -13,9 +13,9 @@ use crate::{
         },
         utils::compare_no_case,
     },
-    storage::AsBuffer,
     storage::{
-        Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, ParsingPhase, StatusLine, Store,
+        AsBuffer, Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, ParsingPhase, StatusLine,
+        Store,
     },
 };
 
@@ -48,10 +48,7 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
         match block {
             Block::Header(header) if !header.is_elided() => {
                 let key = header.key.data(buf);
-                if compare_no_case(key, b"connection") {
-                    // TODO: check for upgrade?
-                    // header.val.modify(buf, b"close")
-                } else if compare_no_case(key, b"host") {
+                if compare_no_case(key, b"host") {
                     // request line has higher priority than Host header
                     if let Store::Empty = authority {
                         mem::swap(&mut authority, &mut header.val);
@@ -135,7 +132,7 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
             ParsingPhase::Headers => match parse_header(buf, unparsed_buf) {
                 Ok((i, header)) => {
                     let key = header.key.data(buf);
-                    if compare_no_case(key, b"cookies") {
+                    if compare_no_case(key, b"cookie") {
                         kawa.blocks.push_back(Block::Cookies);
                         let mut cookie = header.val.data(buf);
                         while !cookie.is_empty() {
