@@ -1,6 +1,7 @@
 # Kawa
 
-Agnostic representation of HTTP1 and HTTP2, with zero-copy, made for Sōzu.
+Agnostic representation of HTTP/1.1 and HTTP/2.0 for parsing, generating and translating HTTP
+messages, with zero-copy, made for Sōzu.
 
 # Principles
 
