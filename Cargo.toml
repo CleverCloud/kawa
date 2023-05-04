@@ -1,7 +1,14 @@
 [package]
-name = "kawa"
-version = "0.5.2"
+authors = ["Eloi Démolis <eloi.demolis@clever-cloud.com>"]
+description = "Agnostic representation of HTTP/1.1 and HTTP/2.0 for parsing, generating and translating HTTP messages, with zero-copy, made for Sōzu."
 edition = "2021"
+keywords = ["http/1.1", "http/2.0", "clevercloud"]
+license-file = "LICENSE"
+name = "kawa"
+readme = "README.md"
+repository = "https://github.com/CleverCloud/kawa"
+rust-version = "1.66.1"
+version = "0.5.2"
 
 [dependencies]
 nom = "7.1.3"

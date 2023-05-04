@@ -10,7 +10,7 @@ pub trait AsBuffer {
 }
 
 /// Buffer is a pseudo ring buffer specifically designed to store data being parsed
-/// ```ignore
+/// ```txt
 /// buffer        start   half     head  end   len
 /// v             v       v         v     v     v
 /// [             ████████:██████████░░░░░░     ]
@@ -25,21 +25,21 @@ pub trait AsBuffer {
 /// Data is assumed to be processed from left to right.
 /// When data from the begining of the buffer can be discarded, `start` advances.
 /// When `start` overshoot half the length of the buffer, it means half the buffer is unsued.
-/// ```ignore
+/// ```txt
 /// buffer             half  start  head  end   len
 /// v                     v  v      v     v     v
 /// [                     :  ████████░░░░░░     ]
 /// ```
 /// At that point the remaining data of the buffer should be shifted.
 /// Shifting the buffer memmoved the available data back at the begining of the buffer.
-/// ```ignore
+/// ```txt
 /// buffer
 /// start   head  end     half                  len
 /// v       v     v       v                     v
 /// [████████░░░░░░       :                     ]
 /// ```
 /// It is also recommended to shift an empty buffer if `start` is not 0.
-/// ```ignore
+/// ```txt
 /// buffer   start/end    half                  len
 /// v        v            v                     v
 /// [        |            :                     ]

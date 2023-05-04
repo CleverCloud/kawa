@@ -19,7 +19,7 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
     req.blocks.reserve(16);
-    for _ in 0..10000000 {
+    for _ in 0..10_000_000 {
         req.clear();
         req.storage.write(REQ_LONG).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
@@ -38,7 +38,7 @@ Connection: close\r\n\r\n";
     let mut buffer = vec![0; 512];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
     req.blocks.reserve(16);
-    for _ in 0..10000000 {
+    for _ in 0..10_000_000 {
         req.clear();
         req.storage.write(REQ_SHORT).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);

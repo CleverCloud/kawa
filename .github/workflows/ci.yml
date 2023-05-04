@@ -1,0 +1,120 @@
+---
+name: Continuous integration
+on:
+  pull_request:
+    branches:
+    - "**"
+  push:
+    branches:
+    - "main"
+jobs:
+  build:
+    name: Build kawa
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        rust:
+          - 1.66.1
+          - stable
+          - beta
+          - nightly
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --all-features
+  build-no-default-features:
+    name: Build kawa with no features enabled
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        # We do not need to build across all supported versions the minimum supported rust version is
+        # enough. This check is here to detect conflict with the compiler feature flag.
+        rust:
+          - 1.66.1
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --no-default-features
+  test:
+    name: Trigger tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        rust:
+          - 1.66.1
+          - stable
+          - beta
+          - nightly
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --release --verbose --all-features
+  format:
+    name: Format source code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - run: rustup component add rustfmt
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --verbose --all -- --check
+  clippy:
+    name: Lint source code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - run: rustup component add clippy
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --verbose --all-features -- -D warnings
+  doc:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --verbose
+...
