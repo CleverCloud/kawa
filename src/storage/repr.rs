@@ -1,8 +1,11 @@
+use std::io::IoSlice;
 #[cfg(feature = "rc-alloc")]
 use std::rc::Rc;
-use std::{collections::VecDeque, io::IoSlice};
 
 use crate::storage::{AsBuffer, BlockConverter, Buffer};
+
+// use std::collections::VecDeque;
+use crate::storage::VecDeque;
 
 /// Intermediate representation for both H1 and H2 protocols
 ///
@@ -43,15 +46,15 @@ impl<T: AsBuffer> Kawa<T> {
     pub fn new(kind: Kind, storage: Buffer<T>) -> Self {
         Self {
             kind,
-            blocks: VecDeque::new(),
-            out: VecDeque::new(),
+            blocks: VecDeque::with_capacity(64),
+            out: VecDeque::with_capacity(128),
             expects: 0,
             parsing_phase: ParsingPhase::StatusLine,
             body_size: BodySize::Empty,
             storage,
             detached: DetachedBlocks {
                 status_line: StatusLine::Unknown,
-                jar: VecDeque::new(),
+                jar: VecDeque::with_capacity(32),
             },
         }
     }
@@ -59,12 +62,35 @@ impl<T: AsBuffer> Kawa<T> {
     /// Synchronize back all the Stores from blocks and out with the underlying data of Buffer.
     /// This is necessary after a Buffer::shift.
     pub fn push_left(&mut self, amount: u32) {
-        for block in &mut self.blocks {
-            block.push_left(amount);
-        }
+        // match &mut self.detached.status_line {
+        //     StatusLine::Unknown => {}
+        //     StatusLine::Request {
+        //         method,
+        //         authority,
+        //         path,
+        //         uri,
+        //         ..
+        //     } => {
+        //         method.push_left(amount);
+        //         authority.push_left(amount);
+        //         path.push_left(amount);
+        //         uri.push_left(amount);
+        //     }
+        //     StatusLine::Response { status, reason, .. } => {
+        //         status.push_left(amount);
+        //         reason.push_left(amount);
+        //     }
+        // }
+        // for block in &mut self.blocks {
+        //     block.push_left(amount);
+        // }
         for block in &mut self.out {
             block.push_left(amount);
         }
+        // for cookie in &mut self.detached.jar {
+        //     cookie.key.push_left(amount);
+        //     cookie.val.push_left(amount);
+        // }
     }
 
     /// Convert Kawa representation from Blocks to a protocol specific representation in out.
@@ -112,6 +138,7 @@ impl<T: AsBuffer> Kawa<T> {
     /// call prepare before consume
     pub fn consume(&mut self, mut amount: usize) {
         assert!(self.blocks.is_empty());
+        assert!(self.detached.jar.is_empty());
         while let Some(store) = self.out.pop_front() {
             let (remaining, store) = store.consume(amount);
             amount = remaining;
@@ -237,9 +264,6 @@ pub enum Block {
 impl Block {
     pub fn push_left(&mut self, amount: u32) {
         match self {
-            Block::StatusLine | Block::Cookies => {
-                unimplemented!();
-            }
             Block::Header(header) => {
                 header.key.push_left(amount);
                 header.val.push_left(amount);
@@ -250,7 +274,7 @@ impl Block {
             Block::Chunk(chunk) => {
                 chunk.data.push_left(amount);
             }
-            Block::Flags(_) => {}
+            Block::StatusLine | Block::Cookies | Block::Flags(_) => {}
         }
     }
 }

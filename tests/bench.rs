@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{hint::black_box, io::Write};
 
 use kawa::{h1, Buffer, Kawa, Kind, SliceBuffer};
 
@@ -18,12 +18,17 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.blocks.reserve(16);
-    for _ in 0..10_000_000 {
+    req.storage.write(REQ_LONG).expect("write");
+    // req.blocks.reserve(16);
+    req.detached.jar.reserve(16);
+    for _ in 0..20_000_000 {
         req.clear();
-        req.storage.write(REQ_LONG).expect("write");
-        h1::parse(&mut req, &mut h1::NoCallbacks);
-        assert!(req.is_main_phase())
+        req.storage.fill(REQ_LONG.len());
+        black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        if !req.is_main_phase() {
+            kawa::debug_kawa(&req);
+            assert!(false);
+        }
     }
     kawa::debug_kawa(&req);
 }
@@ -37,12 +42,16 @@ Connection: close\r\n\r\n";
 
     let mut buffer = vec![0; 512];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.blocks.reserve(16);
-    for _ in 0..10_000_000 {
+    req.storage.write(REQ_SHORT).expect("write");
+    // req.blocks.reserve(16);
+    for _ in 0..20_000_000 {
         req.clear();
-        req.storage.write(REQ_SHORT).expect("write");
-        h1::parse(&mut req, &mut h1::NoCallbacks);
-        assert!(req.is_main_phase())
+        req.storage.fill(REQ_SHORT.len());
+        black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        if !req.is_main_phase() {
+            kawa::debug_kawa(&req);
+            assert!(false);
+        }
     }
     kawa::debug_kawa(&req);
 }

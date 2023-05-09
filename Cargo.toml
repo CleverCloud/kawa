@@ -17,5 +17,8 @@ nom = "7.1.3"
 # default = ["rc-alloc"]
 rc-alloc = []
 
-[profile.bench]
+[profile.release]
+lto = true
 debug = true
+codegen-units = 1
+# rustflags = ["-C target-feature=+sse4.2", "-C target-cpu=native"]

@@ -1,3 +1,5 @@
+use std::arch::x86_64::_mm_lddqu_si128;
+
 use nom::{
     bytes::{
         complete::{
@@ -25,11 +27,182 @@ use crate::{
 fn error_position<I, E: ParseError<I>>(i: I, kind: NomErrorKind) -> NomError<E> {
     NomError::Error(make_error(i, kind))
 }
+#[repr(align(16))]
+struct CharRanges([u8; 16]);
+impl std::ops::Deref for CharRanges {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[repr(align(16))]
+struct CharTable([bool; 256]);
+impl std::ops::Deref for CharTable {
+    type Target = [bool; 256];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 macro_rules! make_bool_table {
-    ($($v:expr,)*) => ([
-        $($v != 0,)*
-    ])
+    ($($v:expr,)*) => {
+        CharTable([
+            $($v != 0,)*
+        ])
+    }
+}
+
+#[inline]
+fn take_while_simd(
+    min: usize,
+    predicate: impl Fn(u8) -> bool,
+    ranges: &'static CharRanges,
+) -> impl Fn(&[u8]) -> IResult<&[u8], &[u8]> {
+    move |input| {
+        use std::arch::x86_64::{
+            _mm_cmpestri, _mm_loadu_si128, _SIDD_CMP_RANGES, _SIDD_LEAST_SIGNIFICANT,
+            _SIDD_UBYTE_OPS,
+        };
+
+        let start = input.as_ptr() as usize;
+        let mut i = input.as_ptr() as usize;
+        let mut left = input.len();
+        let mut found = false;
+
+        if left >= 16 {
+            let ranges16 = unsafe { _mm_loadu_si128(ranges.as_ptr() as *const _) };
+            let ranges_len = ranges.len() as i32;
+            loop {
+                let sl = unsafe { _mm_lddqu_si128(i as *const _) };
+
+                let idx = unsafe {
+                    _mm_cmpestri(
+                        ranges16,
+                        ranges_len,
+                        sl,
+                        16,
+                        _SIDD_LEAST_SIGNIFICANT | _SIDD_CMP_RANGES | _SIDD_UBYTE_OPS,
+                    )
+                };
+                // println!(
+                //     "{:?}: {}",
+                //     std::str::from_utf8(&input[i - start..i - start + 16]),
+                //     idx
+                // );
+
+                if idx != 16 {
+                    i += idx as usize;
+                    found = true;
+                    break;
+                }
+
+                i += 16;
+                left -= 16;
+
+                if left < 16 {
+                    break;
+                }
+            }
+        }
+
+        let mut i = i - start;
+        if !found {
+            loop {
+                if !predicate(input[i]) {
+                    break;
+                }
+                i += 1;
+                if i == input.len() {
+                    // println!("{:?}: incomplete", from_utf8(input));
+                    return Err(NomError::Incomplete(nom::Needed::Unknown));
+                }
+            }
+        }
+
+        if i < min {
+            // println!("{:?}: takewhile1", from_utf8(input));
+            Err(error_position(input, NomErrorKind::TakeWhile1))
+        } else if i == input.len() {
+            // println!("{:?}: incomplete", from_utf8(input));
+            return Err(NomError::Incomplete(nom::Needed::Unknown));
+        } else {
+            let (prefix, suffix) = input.split_at(i);
+            // println!("{:?}: {:?}", from_utf8(input), from_utf8(prefix));
+            Ok((suffix, prefix))
+        }
+    }
+}
+
+#[inline]
+fn take_while_complete_simd(
+    predicate: impl Fn(u8) -> bool,
+    ranges: &'static CharRanges,
+) -> impl Fn(&[u8]) -> IResult<&[u8], &[u8]> {
+    move |input| {
+        use std::arch::x86_64::{
+            _mm_cmpestri, _mm_load_si128, _mm_loadu_si128, _SIDD_CMP_RANGES,
+            _SIDD_LEAST_SIGNIFICANT, _SIDD_UBYTE_OPS,
+        };
+
+        let start = input.as_ptr() as usize;
+        let mut i = input.as_ptr() as usize;
+        let mut left = input.len();
+        let mut found = false;
+
+        if left >= 16 {
+            let ranges16 = unsafe { _mm_load_si128(ranges.as_ptr() as *const _) };
+            let ranges_len = ranges.len() as i32;
+            loop {
+                let sl = unsafe { _mm_loadu_si128(i as *const _) };
+
+                let idx = unsafe {
+                    _mm_cmpestri(
+                        ranges16,
+                        ranges_len,
+                        sl,
+                        16,
+                        _SIDD_LEAST_SIGNIFICANT | _SIDD_CMP_RANGES | _SIDD_UBYTE_OPS,
+                    )
+                };
+                // println!(
+                //     "{:?}: {}",
+                //     std::str::from_utf8(&input[i - start..i - start + 16]),
+                //     idx
+                // );
+
+                if idx != 16 {
+                    i += idx as usize;
+                    found = true;
+                    break;
+                }
+
+                i += 16;
+                left -= 16;
+
+                if left < 16 {
+                    break;
+                }
+            }
+        }
+
+        let mut i = i - start;
+        if !found {
+            loop {
+                if !predicate(input[i]) {
+                    break;
+                }
+                i += 1;
+                if i == input.len() {
+                    break;
+                }
+            }
+        }
+
+        let (prefix, suffix) = input.split_at(i);
+        // println!("{:?}: {:?}", from_utf8(input), from_utf8(prefix));
+        Ok((suffix, prefix))
+    }
 }
 
 //////////////////////////////////////////////////
@@ -37,7 +210,7 @@ macro_rules! make_bool_table {
 //////////////////////////////////////////////////
 
 #[rustfmt::skip]
-const TCHAR_MAP: [bool; 256] = make_bool_table![
+const TCHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -68,10 +241,13 @@ const TCHAR_MAP: [bool; 256] = make_bool_table![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
+const TCHAR_RANGES: CharRanges = CharRanges([
+    0x00, 0x20, 0x3A, 0x40, 0x7F, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
 
 #[rustfmt::skip]
 #[allow(dead_code)]
-const VCHAR_MAP: [bool; 256] = make_bool_table![
+const VCHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
@@ -102,9 +278,11 @@ const VCHAR_MAP: [bool; 256] = make_bool_table![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
+const VCHAR_RANGES: CharRanges =
+    CharRanges([0x00, 0x20, 0x7F, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
 #[rustfmt::skip]
-const CCHAR_MAP: [bool; 256] = make_bool_table![
+const CCHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -135,9 +313,15 @@ const CCHAR_MAP: [bool; 256] = make_bool_table![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
+const CK_CHAR_RANGES: CharRanges = CharRanges([
+    0x00, 0x20, 0x3B, 0x3B, 0x3D, 0x3D, 0x7F, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
+const CV_CHAR_RANGES: CharRanges = CharRanges([
+    0x00, 0x20, 0x3B, 0x3B, 0x7F, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
 
 #[rustfmt::skip]
-const ACHAR_MAP: [bool; 256] = make_bool_table![
+const ACHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
@@ -168,37 +352,36 @@ const ACHAR_MAP: [bool; 256] = make_bool_table![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
+const ACHAR_RANGES: CharRanges = CharRanges([
+    0x00, 0x08, 0x0A, 0x1F, 0x7F, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
 
 // Primitives
+#[inline]
 fn is_tchar(i: u8) -> bool {
     // is_alphanumeric(i) || b"!#$%&'*+-.^_`|~".contains(&i)
     // unsafe { *TCHAR_MAP.get_unchecked(i as usize) }
     TCHAR_MAP[i as usize]
 }
-fn token(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_tchar)(i)
-}
 
+#[inline]
 fn is_vchar(i: u8) -> bool {
     i > 32 && i < 127
     // VCHAR_MAP[i as usize]
 }
-fn value_token(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_vchar)(i)
-}
 
+#[inline]
 fn is_reason_char(i: u8) -> bool {
     // i == 9 || (32..=126).contains(&i)
     ACHAR_MAP[i as usize]
 }
-fn reason_token(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    take_while(is_reason_char)(i)
-}
 
+#[inline]
 fn space(i: &[u8]) -> IResult<&[u8], char> {
     char(' ')(i)
 }
 
+#[inline]
 pub fn crlf(i: &[u8]) -> IResult<&[u8], &[u8]> {
     tag(b"\r\n")(i)
 }
@@ -206,17 +389,18 @@ pub fn crlf(i: &[u8]) -> IResult<&[u8], &[u8]> {
 // allows ISO-8859-1 characters in header values
 // this is allowed in RFC 2616 but not in rfc7230
 // cf https://github.com/sozu-proxy/sozu/issues/479
-#[cfg(feature = "tolerant-http1-parser")]
-fn is_header_value_char(i: u8) -> bool {
-    i == 9 || (i >= 32 && i <= 126) || i >= 160
-}
+// #[cfg(feature = "tolerant-http1-parser")]
+// fn is_header_value_char(i: u8) -> bool {
+//     i == 9 || (i >= 32 && i <= 126) || i >= 160
+// }
 
-#[cfg(not(feature = "tolerant-http1-parser"))]
+// #[cfg(not(feature = "tolerant-http1-parser"))]
 fn is_header_value_char(i: u8) -> bool {
     // i == 9 || (32..=126).contains(&i)
     ACHAR_MAP[i as usize]
 }
 
+#[inline]
 fn http_version(i: &[u8]) -> IResult<&[u8], Version> {
     let (i, _) = tag("HTTP/1.")(i)?;
     let (i, minor) = one_of("01")(i)?;
@@ -231,6 +415,7 @@ fn http_version(i: &[u8]) -> IResult<&[u8], Version> {
     ))
 }
 
+#[inline]
 fn http_status(i: &[u8]) -> IResult<&[u8], (&[u8], u16)> {
     let (i, status) = take(3usize)(i)?;
     let code = std::str::from_utf8(status)
@@ -246,8 +431,15 @@ fn http_status(i: &[u8]) -> IResult<&[u8], (&[u8], u16)> {
 ///
 /// example: `GET www.clever.cloud.com HTTP/1.1\r\n`
 pub fn parse_request_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], StatusLine> {
-    let (i, (method, _, uri, _, version, _)) =
-        tuple((token, space, value_token, space, http_version, crlf))(i)?;
+    let (i, (method, _, uri, _, version, _)) = tuple((
+        take_while(is_tchar),
+        space,
+        // take_while(is_vchar),
+        take_while_simd(0, is_vchar, &VCHAR_RANGES),
+        space,
+        http_version,
+        crlf,
+    ))(i)?;
 
     Ok((
         i,
@@ -265,8 +457,14 @@ pub fn parse_request_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], S
 ///
 /// example: `HTTP/1.1 200 OK\r\n`
 pub fn parse_response_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], StatusLine> {
-    let (i, (version, _, (status, code), _, reason, _)) =
-        tuple((http_version, space, http_status, space, reason_token, crlf))(i)?;
+    let (i, (version, _, (status, code), _, reason, _)) = tuple((
+        http_version,
+        space,
+        http_status,
+        space,
+        take_while(is_reason_char),
+        crlf,
+    ))(i)?;
 
     Ok((
         i,
@@ -282,22 +480,27 @@ pub fn parse_response_line<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], 
 /// parse a HTTP header, including terminating CRLF
 ///
 /// example: `Content-Length: 42\r\n`
-pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
+pub fn parse_header<'a>(i: &'a [u8]) -> IResult<&'a [u8], (&'a [u8], &'a [u8])> {
     // TODO handle folding?
     let (i, (key, _, _, val, _)) = tuple((
-        token,
+        // take_while(is_tchar),
+        // take_while_unrolled(0, is_tchar),
+        take_while_simd(1, is_tchar, &TCHAR_RANGES),
         tag(":"),
         take_while(is_space),
-        take_while(is_header_value_char),
+        take_while_simd(1, is_header_value_char, &ACHAR_RANGES),
+        // take_while_unrolled(1, is_header_value_char),
+        // take_while(is_header_value_char),
         crlf,
     ))(i)?;
 
     Ok((
         i,
-        Pair {
-            key: Store::new_slice(buffer, key),
-            val: Store::new_slice(buffer, val),
-        },
+        (key, val),
+        // Pair {
+        //     key: Store::new_slice(buffer, key),
+        //     val: Store::new_slice(buffer, val),
+        // },
     ))
 }
 
@@ -306,7 +509,7 @@ pub fn parse_header<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
 //////////////////////////////////////////////////
 
 #[rustfmt::skip]
-const SCHEME_CHAR_MAP: [bool; 256] = make_bool_table![
+const SCHEME_CHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -339,7 +542,7 @@ const SCHEME_CHAR_MAP: [bool; 256] = make_bool_table![
 ];
 
 #[rustfmt::skip]
-const AUTHORITY_CHAR_MAP: [bool; 256] = make_bool_table![
+const AUTHORITY_CHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -372,7 +575,7 @@ const AUTHORITY_CHAR_MAP: [bool; 256] = make_bool_table![
 ];
 
 #[rustfmt::skip]
-const USERINFO_CHAR_MAP: [bool; 256] = make_bool_table![
+const USERINFO_CHAR_MAP: CharTable = make_bool_table![
     // Control characters
 // \0                   \a \b \t \n \v \f \r
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -425,10 +628,12 @@ fn is_single_crumb_val_char(i: u8) -> bool {
 /// ```
 pub fn parse_single_crumb<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], Pair> {
     let (i, (key, val)) = tuple((
-        take_while_complete(is_single_crumb_key_char),
+        // take_while_complete(is_single_crumb_key_char),
+        take_while_complete_simd(is_single_crumb_key_char, &CK_CHAR_RANGES),
         opt(tuple((
             tag_complete(b"="),
-            take_while_complete(is_single_crumb_val_char),
+            // take_while_complete(is_single_crumb_val_char),
+            take_while_complete_simd(is_single_crumb_val_char, &CV_CHAR_RANGES),
         ))),
     ))(i)?;
 

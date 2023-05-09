@@ -39,7 +39,12 @@ impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
                     return;
                 }
                 kawa.push_out(Store::Static(b"------------ HEADER"));
-                for cookie in kawa.detached.jar.drain(..) {
+                for cookie in kawa
+                    .detached
+                    .jar
+                    .drain(..)
+                    .filter(|cookie| !cookie.is_elided())
+                {
                     kawa.out
                         .push_back(OutBlock::Store(Store::Static(b"\nCookie: ")));
                     kawa.out.push_back(OutBlock::Store(cookie.key));
