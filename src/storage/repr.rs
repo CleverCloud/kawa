@@ -61,38 +61,12 @@ impl<T: AsBuffer> Kawa<T> {
         }
     }
 
-    /// Synchronize back all the Stores from blocks and out with the underlying data of Buffer.
+    /// Synchronize back all the Stores from out with the underlying data of Buffer.
     /// This is necessary after a Buffer::shift.
     pub fn push_left(&mut self, amount: u32) {
-        // match &mut self.detached.status_line {
-        //     StatusLine::Unknown => {}
-        //     StatusLine::Request {
-        //         method,
-        //         authority,
-        //         path,
-        //         uri,
-        //         ..
-        //     } => {
-        //         method.push_left(amount);
-        //         authority.push_left(amount);
-        //         path.push_left(amount);
-        //         uri.push_left(amount);
-        //     }
-        //     StatusLine::Response { status, reason, .. } => {
-        //         status.push_left(amount);
-        //         reason.push_left(amount);
-        //     }
-        // }
-        // for block in &mut self.blocks {
-        //     block.push_left(amount);
-        // }
         for block in &mut self.out {
             block.push_left(amount);
         }
-        // for cookie in &mut self.detached.jar {
-        //     cookie.key.push_left(amount);
-        //     cookie.val.push_left(amount);
-        // }
     }
 
     /// Convert Kawa representation from Blocks to a protocol specific representation in out.

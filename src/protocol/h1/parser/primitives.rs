@@ -230,6 +230,25 @@ pub fn parse_response_line(i: &[u8]) -> IResult<&[u8], (Version, &[u8], u16, &[u
 }
 
 /// parse a HTTP header, including terminating CRLF
+/// if it is a cookie header, nothing is returned and parse_single_crumb should be called
+///
+/// example: `Content-Length: 42\r\n`
+#[inline]
+#[allow(clippy::type_complexity)]
+pub fn parse_header_or_cookie(i: &[u8]) -> IResult<&[u8], Option<(&[u8], &[u8])>> {
+    let (i, key) = tchar::take_while_simd(i)?;
+    let (i, _) = tag(b":")(i)?;
+    let (i, _) = take_while(is_space)(i)?;
+    if compare_no_case(key, b"cookie") {
+        return Ok((i, None));
+    }
+    let (i, val) = achar::take_while_simd(i)?;
+    let (i, _) = crlf(i)?;
+    Ok((i, Some((key, val))))
+}
+
+/// parse a HTTP header, including terminating CRLF
+/// note: treat cookie headers as regular headers
 ///
 /// example: `Content-Length: 42\r\n`
 #[inline]
@@ -240,6 +259,31 @@ pub fn parse_header(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
     let (i, val) = achar::take_while_simd(i)?;
     let (i, _) = crlf(i)?;
     Ok((i, (key, val)))
+}
+
+/// parse a single crumb from a Cookie header
+///
+/// examples:
+/// ```txt
+/// crumb=0          -> ("crumb", "0")
+/// crumb=1; crumb=2 -> ("crumb", "1")
+/// ```
+#[inline]
+#[allow(clippy::type_complexity)]
+pub fn parse_single_crumb(i: &[u8], first: bool) -> IResult<&[u8], (&[u8], &[u8])> {
+    let i = if !first {
+        let (i, _) = tag(b"; ")(i)?;
+        i
+    } else {
+        i
+    };
+    let (i, key) = ck_char::take_while_simd(i)?;
+    let (i, val) = opt(tuple((tag(b"="), cv_char::take_while_simd)))(i)?;
+
+    match val {
+        Some((_, val)) => Ok((i, (key, val))),
+        None => Ok((i, (&key[..0], key))),
+    }
 }
 
 //////////////////////////////////////////////////
@@ -356,33 +400,6 @@ fn is_authority_char(i: u8) -> bool {
 #[inline]
 fn is_userinfo_char(i: u8) -> bool {
     USERINFO_CHAR_MAP[i as usize]
-}
-
-/// parse a single crumb from a Cookie header
-///
-/// examples:
-/// ```txt
-/// crumb=0          -> ("crumb", "0")
-/// crumb=1; crumb=2 -> ("crumb", "1")
-/// ```
-#[inline]
-#[allow(clippy::type_complexity)]
-pub fn parse_single_crumb(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
-    let (i, key) = ck_char::take_while_complete_simd(i)?;
-    let (i, val) = opt(tuple((
-        tag_complete(b"="),
-        cv_char::take_while_complete_simd,
-    )))(i)?;
-
-    let crumb = match val {
-        Some((_, val)) => (key, val),
-        None => (&key[..0], key),
-    };
-    if i.is_empty() {
-        return Ok((i, crumb));
-    }
-    let (i, _) = tag_complete(b"; ")(i)?;
-    Ok((i, crumb))
 }
 
 #[inline]

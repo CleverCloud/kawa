@@ -9,8 +9,8 @@ mod primitives;
 use crate::{
     protocol::{
         h1::parser::primitives::{
-            crlf, parse_chunk_header, parse_header, parse_request_line, parse_response_line,
-            parse_single_crumb, parse_url,
+            crlf, parse_chunk_header, parse_header, parse_header_or_cookie, parse_request_line,
+            parse_response_line, parse_single_crumb, parse_url,
         },
         utils::compare_no_case,
     },
@@ -112,7 +112,7 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
     loop {
         let buf = kawa.storage.buffer();
         let mut unparsed_buf = kawa.storage.unparsed_data();
-        while !unparsed_buf.is_empty() {
+        'main: while !unparsed_buf.is_empty() {
             match kawa.parsing_phase {
                 ParsingPhase::StatusLine => {
                     match kawa.kind {
@@ -151,34 +151,43 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                     kawa.blocks.push_back(Block::StatusLine);
                     kawa.parsing_phase = ParsingPhase::Headers;
                 }
-                ParsingPhase::Headers => match parse_header(unparsed_buf) {
-                    Ok((i, (key, val))) => {
-                        if compare_no_case(key, b"cookie") {
-                            kawa.blocks.push_back(Block::Cookies);
-                            let mut cookie = val;
-                            while !cookie.is_empty() {
-                                match parse_single_crumb(cookie) {
-                                    Ok((i, (key, val))) => {
-                                        kawa.detached.jar.push_back(Pair {
-                                            key: Store::new_slice(buf, key),
-                                            val: Store::new_slice(buf, val),
-                                        });
-                                        cookie = i;
-                                    }
-                                    Err(e) => {
-                                        println!("{e:?}");
-                                        kawa.parsing_phase = ParsingPhase::Error;
+                ParsingPhase::Headers => match parse_header_or_cookie(unparsed_buf) {
+                    Ok((i, Some((key, val)))) => {
+                        kawa.blocks.push_back(Block::Header(Pair {
+                            key: Store::new_slice(buf, key),
+                            val: Store::new_slice(buf, val),
+                        }));
+                        unparsed_buf = i;
+                    }
+                    Ok((i, None)) => {
+                        unparsed_buf = i;
+                        kawa.blocks.push_back(Block::Cookies);
+                        let mut first = true;
+                        loop {
+                            match parse_single_crumb(unparsed_buf, first) {
+                                Ok((i, (key, val))) => {
+                                    kawa.detached.jar.push_back(Pair {
+                                        key: Store::new_slice(buf, key),
+                                        val: Store::new_slice(buf, val),
+                                    });
+                                    unparsed_buf = i;
+                                }
+                                Err(NomError::Incomplete(_)) => {
+                                    break 'main;
+                                }
+                                Err(_) => match crlf(unparsed_buf) {
+                                    Ok((i, _)) => {
+                                        unparsed_buf = i;
                                         break;
                                     }
-                                }
+                                    Err(error) => {
+                                        kawa.parsing_phase = handle_error(kawa, error);
+                                        break 'main;
+                                    }
+                                },
                             }
-                        } else {
-                            kawa.blocks.push_back(Block::Header(Pair {
-                                key: Store::new_slice(buf, key),
-                                val: Store::new_slice(buf, val),
-                            }));
+                            first = false;
                         }
-                        unparsed_buf = i;
                     }
                     Err(NomError::Incomplete(_)) => {
                         break;
