@@ -73,6 +73,8 @@ jobs:
         with:
           command: test
           args: --release --verbose --all-features
+        env:
+          RUSTFLAGS: -C target-feature=+sse4.2 -C target-cpu=native
   format:
     name: Format source code
     runs-on: ubuntu-latest

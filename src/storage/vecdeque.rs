@@ -12,6 +12,12 @@ fn wrap_index(index: usize, cap: usize) -> usize {
     index & (cap - 1)
 }
 
+impl<T: Sized> Default for VecDeque<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Sized> VecDeque<T> {
     #[inline]
     pub fn new() -> Self {
@@ -20,6 +26,7 @@ impl<T: Sized> VecDeque<T> {
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         assert!(capacity > 0);
+        assert!(capacity % 2 == 0);
         unsafe {
             let layout = std::alloc::Layout::array::<T>(capacity).expect("LAYOUT");
             let ptr = std::alloc::alloc(layout) as *mut T;
@@ -46,20 +53,20 @@ impl<T: Sized> VecDeque<T> {
     }
     #[inline]
     pub fn push_back(&mut self, element: T) {
-        unsafe { self.ptr.offset(self.head as isize).write(element) };
+        unsafe { self.ptr.add(self.head).write(element) };
         self.head = wrap_index(self.head + 1, self.cap);
         self.len += 1;
         if self.is_full() {
-            unreachable!();
+            self.grow(1);
         }
     }
     #[inline]
     pub fn push_front(&mut self, element: T) {
-        unsafe { self.ptr.offset(self.tail as isize).write(element) };
+        unsafe { self.ptr.add(self.tail).write(element) };
         self.tail = wrap_index(self.tail + self.cap - 1, self.cap);
         self.len += 1;
         if self.is_full() {
-            unreachable!();
+            self.grow(1);
         }
     }
     #[inline]
@@ -69,7 +76,7 @@ impl<T: Sized> VecDeque<T> {
         }
         self.head = wrap_index(self.head + self.cap - 1, self.cap);
         self.len -= 1;
-        unsafe { Some(self.ptr.offset(self.head as isize).read()) }
+        unsafe { Some(self.ptr.add(self.head).read()) }
     }
     #[inline]
     pub fn pop_front(&mut self) -> Option<T> {
@@ -78,20 +85,19 @@ impl<T: Sized> VecDeque<T> {
         }
         self.tail = wrap_index(self.tail + 1, self.cap);
         self.len -= 1;
-        unsafe { Some(self.ptr.offset(self.tail as isize).read()) }
+        unsafe { Some(self.ptr.add(self.tail).read()) }
     }
     pub fn clear(&mut self) {
         let mut index = self.tail;
         for _ in 0..self.len {
             index = wrap_index(index + 1, self.cap);
-            unsafe { self.ptr.offset(index as isize).drop_in_place() };
+            unsafe { self.ptr.add(index).drop_in_place() };
         }
         self.len = 0;
         self.head = 0;
         self.tail = self.cap - 1;
     }
     pub fn iter(&self) -> Iter<T> {
-        // let ring = unsafe { std::slice::from_raw_parts(self.ptr, self.cap) };
         Iter {
             remaining: self.len,
             index: self.tail,
@@ -101,7 +107,6 @@ impl<T: Sized> VecDeque<T> {
         }
     }
     pub fn iter_mut(&self) -> IterMut<T> {
-        // let ring = unsafe { std::slice::from_raw_parts_mut(self.ptr, self.cap) };
         IterMut {
             remaining: self.len,
             index: self.tail,
@@ -110,7 +115,12 @@ impl<T: Sized> VecDeque<T> {
             _a: std::marker::PhantomData,
         }
     }
-    pub fn reserve(&mut self, _capacity: usize) {}
+    pub fn reserve(&mut self, _capacity: usize) {
+        // unimplemented!();
+    }
+    pub fn grow(&mut self, _capacity: usize) {
+        unimplemented!();
+    }
     pub fn drain<R>(&mut self, _range: R) -> Drain<T>
     where
         R: std::ops::RangeBounds<usize>,
@@ -177,7 +187,7 @@ impl<'a, T: Sized> Iterator for Iter<'a, T> {
         }
         self.remaining -= 1;
         self.index = wrap_index(self.index + 1, self.cap);
-        Some(unsafe { self.ring.offset(self.index as isize).as_ref().unwrap() })
+        Some(unsafe { self.ring.add(self.index).as_ref().unwrap() })
     }
 }
 impl<'a, T: Sized> Iterator for IterMut<'a, T> {
@@ -189,7 +199,7 @@ impl<'a, T: Sized> Iterator for IterMut<'a, T> {
         }
         self.remaining -= 1;
         self.index = wrap_index(self.index + 1, self.cap);
-        Some(unsafe { self.ring.offset(self.index as isize).as_mut().unwrap() })
+        Some(unsafe { self.ring.add(self.index).as_mut().unwrap() })
     }
 }
 impl<'a, T: Sized> Iterator for Drain<'a, T> {
@@ -201,6 +211,6 @@ impl<'a, T: Sized> Iterator for Drain<'a, T> {
         }
         self.remaining -= 1;
         self.index = wrap_index(self.index + 1, self.cap);
-        Some(unsafe { self.ring.offset(self.index as isize).read() })
+        Some(unsafe { self.ring.add(self.index).read() })
     }
 }

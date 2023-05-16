@@ -4,8 +4,10 @@ use std::rc::Rc;
 
 use crate::storage::{AsBuffer, BlockConverter, Buffer};
 
-// use std::collections::VecDeque;
+#[cfg(not(feature = "std-vecdeque"))]
 use crate::storage::VecDeque;
+#[cfg(feature = "std-vecdeque")]
+use std::collections::VecDeque;
 
 /// Intermediate representation for both H1 and H2 protocols
 ///

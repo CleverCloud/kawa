@@ -1,8 +1,9 @@
 use std::cmp::min;
-use std::mem::{self};
+use std::mem;
 
 use nom::{Err as NomError, Offset, ParseTo};
 
+/// Primitives used to parse http using nom and simd optimization when applicable
 mod primitives;
 
 use crate::{
@@ -114,21 +115,41 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
         while !unparsed_buf.is_empty() {
             match kawa.parsing_phase {
                 ParsingPhase::StatusLine => {
-                    let status_line = match kawa.kind {
-                        Kind::Request => parse_request_line(buf, unparsed_buf),
-                        Kind::Response => parse_response_line(buf, unparsed_buf),
-                    };
-                    let (i, status_line) = match status_line {
-                        Ok(ok) => ok,
-                        Err(error) => {
-                            kawa.parsing_phase = handle_error(kawa, error);
-                            break;
-                        }
+                    match kawa.kind {
+                        Kind::Request => match parse_request_line(unparsed_buf) {
+                            Ok((i, (method, uri, version))) => {
+                                kawa.detached.status_line = StatusLine::Request {
+                                    version,
+                                    method: Store::new_slice(buf, method),
+                                    uri: Store::new_slice(buf, uri),
+                                    authority: Store::Empty,
+                                    path: Store::Empty,
+                                };
+                                unparsed_buf = i;
+                            }
+                            Err(error) => {
+                                kawa.parsing_phase = handle_error(kawa, error);
+                                break;
+                            }
+                        },
+                        Kind::Response => match parse_response_line(unparsed_buf) {
+                            Ok((i, (version, status, code, reason))) => {
+                                kawa.detached.status_line = StatusLine::Response {
+                                    version,
+                                    code,
+                                    status: Store::new_slice(buf, status),
+                                    reason: Store::new_slice(buf, reason),
+                                };
+                                unparsed_buf = i;
+                            }
+                            Err(error) => {
+                                kawa.parsing_phase = handle_error(kawa, error);
+                                break;
+                            }
+                        },
                     };
                     kawa.blocks.push_back(Block::StatusLine);
-                    kawa.detached.status_line = status_line;
                     kawa.parsing_phase = ParsingPhase::Headers;
-                    unparsed_buf = i;
                 }
                 ParsingPhase::Headers => match parse_header(unparsed_buf) {
                     Ok((i, (key, val))) => {
@@ -136,12 +157,16 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                             kawa.blocks.push_back(Block::Cookies);
                             let mut cookie = val;
                             while !cookie.is_empty() {
-                                match parse_single_crumb(buf, cookie) {
-                                    Ok((i, crumb)) => {
-                                        kawa.detached.jar.push_back(crumb);
+                                match parse_single_crumb(cookie) {
+                                    Ok((i, (key, val))) => {
+                                        kawa.detached.jar.push_back(Pair {
+                                            key: Store::new_slice(buf, key),
+                                            val: Store::new_slice(buf, val),
+                                        });
                                         cookie = i;
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
+                                        println!("{e:?}");
                                         kawa.parsing_phase = ParsingPhase::Error;
                                         break;
                                     }
