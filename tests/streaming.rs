@@ -18,19 +18,20 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQ_LONG).expect("write");
     req.blocks.reserve(16);
     req.detached.jar.reserve(16);
-    for _ in 0..20_000_000 {
+
+    for _ in 0..10000 {
         req.clear();
-        req.storage.fill(REQ_LONG.len());
-        black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        for char in REQ_LONG {
+            req.storage.write(&[*char]).expect("write");
+            black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        }
         if !req.is_main_phase() {
             kawa::debug_kawa(&req);
             assert!(false);
         }
     }
-    kawa::debug_kawa(&req);
 }
 
 #[test]
@@ -42,16 +43,17 @@ Connection: close\r\n\r\n";
 
     let mut buffer = vec![0; 512];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQ_SHORT).expect("write");
     req.blocks.reserve(16);
-    for _ in 0..20_000_000 {
+
+    for _ in 0..10000 {
         req.clear();
-        req.storage.fill(REQ_SHORT.len());
-        black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        for char in REQ_SHORT {
+            req.storage.write(&[*char]).expect("write");
+            black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        }
         if !req.is_main_phase() {
             kawa::debug_kawa(&req);
             assert!(false);
         }
     }
-    kawa::debug_kawa(&req);
 }

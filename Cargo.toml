@@ -8,7 +8,7 @@ name = "kawa"
 readme = "README.md"
 repository = "https://github.com/CleverCloud/kawa"
 rust-version = "1.66.1"
-version = "0.6.1"
+version = "0.6.2"
 
 [dependencies]
 nom = "7.1.3"

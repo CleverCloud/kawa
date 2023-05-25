@@ -4,9 +4,9 @@ use std::rc::Rc;
 
 use crate::storage::{AsBuffer, BlockConverter, Buffer};
 
-#[cfg(not(feature = "std-vecdeque"))]
+#[cfg(feature = "custom-vecdeque")]
 use crate::storage::VecDeque;
-#[cfg(feature = "std-vecdeque")]
+#[cfg(not(feature = "custom-vecdeque"))]
 use std::collections::VecDeque;
 
 /// Intermediate representation for both H1 and H2 protocols
@@ -170,7 +170,10 @@ impl<T: AsBuffer> Kawa<T> {
             | ParsingPhase::Chunks { .. }
             | ParsingPhase::Trailers
             | ParsingPhase::Terminated => true,
-            ParsingPhase::StatusLine | ParsingPhase::Headers | ParsingPhase::Error => false,
+            ParsingPhase::StatusLine
+            | ParsingPhase::Headers
+            | ParsingPhase::Cookies { .. }
+            | ParsingPhase::Error => false,
         }
     }
 
@@ -209,6 +212,9 @@ pub enum Kind {
 pub enum ParsingPhase {
     StatusLine,
     Headers,
+    Cookies {
+        first: bool,
+    },
     Body,
     /// The "first" field is not directly used by Kawa, it is intended for parsers, mainly H1
     /// parsers that can benefit from distinguishing the start of the first chunk from the others.

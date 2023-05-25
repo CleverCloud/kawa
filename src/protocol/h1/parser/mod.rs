@@ -63,18 +63,27 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
             } else if compare_no_case(key, b"content-length") {
                 match kawa.body_size {
                     BodySize::Empty => {}
-                    BodySize::Chunked | BodySize::Length(_) => todo!(),
+                    BodySize::Chunked | BodySize::Length(_) => {
+                        kawa.parsing_phase = ParsingPhase::Error;
+                        return;
+                    }
                 }
                 match header.val.data(buf).parse_to() {
                     Some(length) => kawa.body_size = BodySize::Length(length),
-                    None => todo!(),
+                    None => {
+                        kawa.parsing_phase = ParsingPhase::Error;
+                        return;
+                    }
                 }
             } else if compare_no_case(key, b"transfer-encoding") {
                 let val = header.val.data(buf);
                 if compare_no_case(val, b"chunked") {
                     match kawa.body_size {
                         BodySize::Empty => {}
-                        BodySize::Chunked | BodySize::Length(_) => todo!(),
+                        BodySize::Chunked | BodySize::Length(_) => {
+                            kawa.parsing_phase = ParsingPhase::Error;
+                            return;
+                        }
                     }
                     kawa.body_size = BodySize::Chunked;
                 }
@@ -160,34 +169,9 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                         unparsed_buf = i;
                     }
                     Ok((i, None)) => {
-                        unparsed_buf = i;
                         kawa.blocks.push_back(Block::Cookies);
-                        let mut first = true;
-                        loop {
-                            match parse_single_crumb(unparsed_buf, first) {
-                                Ok((i, (key, val))) => {
-                                    kawa.detached.jar.push_back(Pair {
-                                        key: Store::new_slice(buf, key),
-                                        val: Store::new_slice(buf, val),
-                                    });
-                                    unparsed_buf = i;
-                                }
-                                Err(NomError::Incomplete(_)) => {
-                                    break 'main;
-                                }
-                                Err(_) => match crlf(unparsed_buf) {
-                                    Ok((i, _)) => {
-                                        unparsed_buf = i;
-                                        break;
-                                    }
-                                    Err(error) => {
-                                        kawa.parsing_phase = handle_error(kawa, error);
-                                        break 'main;
-                                    }
-                                },
-                            }
-                            first = false;
-                        }
+                        kawa.parsing_phase = ParsingPhase::Cookies { first: true };
+                        unparsed_buf = i;
                     }
                     Err(NomError::Incomplete(_)) => {
                         break;
@@ -204,6 +188,31 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                         }
                     },
                 },
+                ParsingPhase::Cookies { ref mut first } => {
+                    match parse_single_crumb(unparsed_buf, *first) {
+                        Ok((i, (key, val))) => {
+                            *first = false;
+                            kawa.detached.jar.push_back(Pair {
+                                key: Store::new_slice(buf, key),
+                                val: Store::new_slice(buf, val),
+                            });
+                            unparsed_buf = i;
+                        }
+                        Err(NomError::Incomplete(_)) => {
+                            break 'main;
+                        }
+                        Err(_) => match crlf(unparsed_buf) {
+                            Ok((i, _)) => {
+                                kawa.parsing_phase = ParsingPhase::Headers;
+                                unparsed_buf = i;
+                            }
+                            Err(error) => {
+                                kawa.parsing_phase = handle_error(kawa, error);
+                                break 'main;
+                            }
+                        },
+                    }
+                }
                 ParsingPhase::Body => {
                     let len = unparsed_buf.len();
                     let taken = if kawa.body_size == BodySize::Empty {
@@ -227,11 +236,12 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                     }
                     unparsed_buf = &unparsed_buf[taken..];
                 }
-                ParsingPhase::Chunks { first } => {
+                ParsingPhase::Chunks { ref mut first } => {
                     if kawa.expects == 0 {
-                        let (i, (size_hexa, size)) = match parse_chunk_header(first, unparsed_buf) {
+                        let (i, (size_hexa, size)) = match parse_chunk_header(*first, unparsed_buf)
+                        {
                             Ok(ok) => {
-                                kawa.parsing_phase = ParsingPhase::Chunks { first: false };
+                                *first = false;
                                 ok
                             }
                             Err(error) => {

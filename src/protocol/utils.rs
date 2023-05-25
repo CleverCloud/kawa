@@ -152,14 +152,11 @@ macro_rules! compile_lookup {
 
                 let mut i = i - start;
                 if !found {
-                    loop {
+                    while i < input.len() {
                         if unsafe { !TABLE.get_unchecked(*input.get_unchecked(i) as usize) } {
                             break;
                         }
                         i += 1;
-                        if i == input.len() {
-                            break;
-                        }
                     }
                 }
 
@@ -211,14 +208,11 @@ macro_rules! compile_lookup {
 
                 let mut i = i - start;
                 if !found {
-                    loop {
+                    while i < input.len() {
                         if unsafe { !TABLE.get_unchecked(*input.get_unchecked(i) as usize) } {
                             break;
                         }
                         i += 1;
-                        if i == input.len() {
-                            break;
-                        }
                     }
                 }
 
