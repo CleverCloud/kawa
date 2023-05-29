@@ -1,3 +1,11 @@
+use std::{
+    alloc::{alloc, dealloc, Layout},
+    marker::PhantomData,
+    ops::{Index, IndexMut, RangeBounds},
+    ptr::copy_nonoverlapping,
+    slice::from_raw_parts_mut,
+};
+
 #[derive(Debug)]
 pub struct VecDeque<T: Sized> {
     tail: usize,
@@ -21,15 +29,15 @@ impl<T: Sized> Default for VecDeque<T> {
 impl<T: Sized> VecDeque<T> {
     #[inline]
     pub fn new() -> Self {
-        Self::with_capacity(32)
+        Self::with_capacity(2)
     }
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         assert!(capacity > 0);
         assert!(capacity % 2 == 0);
         unsafe {
-            let layout = std::alloc::Layout::array::<T>(capacity).expect("LAYOUT");
-            let ptr = std::alloc::alloc(layout) as *mut T;
+            let layout = Layout::array::<T>(capacity).expect("LAYOUT");
+            let ptr = alloc(layout) as *mut T;
             Self {
                 tail: capacity - 1,
                 head: 0,
@@ -87,6 +95,7 @@ impl<T: Sized> VecDeque<T> {
         self.len -= 1;
         unsafe { Some(self.ptr.add(self.tail).read()) }
     }
+    #[inline]
     pub fn clear(&mut self) {
         let mut index = self.tail;
         for _ in 0..self.len {
@@ -97,40 +106,87 @@ impl<T: Sized> VecDeque<T> {
         self.head = 0;
         self.tail = self.cap - 1;
     }
+    #[inline]
+    pub fn reserve(&mut self, capacity: usize) {
+        if self.cap < capacity {
+            self.grow(capacity - self.cap)
+        }
+    }
+    #[inline]
+    pub fn grow(&mut self, additional: usize) {
+        let target = self.cap + additional;
+        let old_layout = unsafe { Layout::array::<T>(self.cap).unwrap_unchecked() };
+        let mut cap = self.cap;
+        while cap < target {
+            cap *= 2;
+        }
+        let new_layout = Layout::array::<T>(cap);
+
+        let Ok(new_layout) = new_layout else {
+            panic!("capacity overflow");
+        };
+        if usize::BITS < 64 && new_layout.size() > isize::MAX as usize {
+            panic!("capacity overflow");
+        }
+
+        self.ptr = unsafe {
+            let new_ptr = alloc(new_layout) as *mut T;
+            let (front, back) = self.as_slices();
+            copy_nonoverlapping(front.as_ptr(), new_ptr, front.len());
+            copy_nonoverlapping(back.as_ptr(), new_ptr.add(front.len()), back.len());
+            dealloc(self.ptr as *mut u8, old_layout);
+            new_ptr
+        };
+        self.head = self.len;
+        self.tail = cap - 1;
+        self.cap = cap;
+    }
+    #[inline]
+    pub fn as_slices(&mut self) -> (&mut [T], &mut [T]) {
+        let tail = wrap_index(self.tail + 1, self.cap);
+        let contiguous = tail < self.head || tail == 0;
+        if contiguous {
+            unsafe { (from_raw_parts_mut(self.ptr.add(tail), self.len), &mut []) }
+        } else {
+            unsafe {
+                (
+                    from_raw_parts_mut(self.ptr.add(tail), self.cap - self.tail - 1),
+                    from_raw_parts_mut(self.ptr, self.head),
+                )
+            }
+        }
+    }
+    #[inline]
     pub fn iter(&self) -> Iter<T> {
         Iter {
             remaining: self.len,
             index: self.tail,
             cap: self.cap,
             ring: self.ptr,
-            _a: std::marker::PhantomData,
+            _marker: PhantomData,
         }
     }
+    #[inline]
     pub fn iter_mut(&self) -> IterMut<T> {
         IterMut {
             remaining: self.len,
             index: self.tail,
             cap: self.cap,
             ring: self.ptr,
-            _a: std::marker::PhantomData,
+            _marker: PhantomData,
         }
     }
-    pub fn reserve(&mut self, _capacity: usize) {
-        // unimplemented!();
-    }
-    pub fn grow(&mut self, _capacity: usize) {
-        unimplemented!();
-    }
+    #[inline]
     pub fn drain<R>(&mut self, _range: R) -> Drain<T>
     where
-        R: std::ops::RangeBounds<usize>,
+        R: RangeBounds<usize>,
     {
         let drain = Drain {
             remaining: self.len,
             index: self.tail,
             cap: self.cap,
             ring: self.ptr,
-            _a: std::marker::PhantomData,
+            _marker: PhantomData,
         };
         self.len = 0;
         self.head = 0;
@@ -139,26 +195,39 @@ impl<T: Sized> VecDeque<T> {
     }
 }
 
+impl<T: Sized> Index<usize> for VecDeque<T> {
+    type Output = T;
+    fn index(&self, i: usize) -> &Self::Output {
+        unsafe { &*self.ptr.add(wrap_index(self.tail + 1 + i, self.cap)) }
+    }
+}
+
+impl<T: Sized> IndexMut<usize> for VecDeque<T> {
+    fn index_mut(&mut self, i: usize) -> &mut T {
+        unsafe { &mut *self.ptr.add(wrap_index(self.tail + 1 + i, self.cap)) }
+    }
+}
+
 pub struct Iter<'a, T: 'a> {
     remaining: usize,
     index: usize,
     cap: usize,
     ring: *const T,
-    _a: std::marker::PhantomData<&'a ()>,
+    _marker: PhantomData<&'a ()>,
 }
 pub struct IterMut<'a, T: 'a> {
     remaining: usize,
     index: usize,
     cap: usize,
     ring: *mut T,
-    _a: std::marker::PhantomData<&'a ()>,
+    _marker: PhantomData<&'a ()>,
 }
 pub struct Drain<'a, T: 'a> {
     remaining: usize,
     index: usize,
     cap: usize,
     ring: *mut T,
-    _a: std::marker::PhantomData<&'a ()>,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl<'a, T: Sized> IntoIterator for &'a VecDeque<T> {
@@ -187,7 +256,7 @@ impl<'a, T: Sized> Iterator for Iter<'a, T> {
         }
         self.remaining -= 1;
         self.index = wrap_index(self.index + 1, self.cap);
-        Some(unsafe { self.ring.add(self.index).as_ref().unwrap() })
+        Some(unsafe { &*self.ring.add(self.index) })
     }
 }
 impl<'a, T: Sized> Iterator for IterMut<'a, T> {
@@ -199,7 +268,7 @@ impl<'a, T: Sized> Iterator for IterMut<'a, T> {
         }
         self.remaining -= 1;
         self.index = wrap_index(self.index + 1, self.cap);
-        Some(unsafe { self.ring.add(self.index).as_mut().unwrap() })
+        Some(unsafe { &mut *self.ring.add(self.index) })
     }
 }
 impl<'a, T: Sized> Iterator for Drain<'a, T> {
@@ -213,4 +282,61 @@ impl<'a, T: Sized> Iterator for Drain<'a, T> {
         self.index = wrap_index(self.index + 1, self.cap);
         Some(unsafe { self.ring.add(self.index).read() })
     }
+}
+
+#[cfg(test)]
+macro_rules! assert_vec {
+    ($v:ident: $($e:expr),* ; $cap:expr) => {
+        assert_eq!($v.cap, $cap);
+        let mut i = 0;
+        $(
+            assert_eq!($v[i], $e);
+            i += 1 ;
+        )*
+        assert_eq!($v.len, i);
+    };
+}
+
+#[test]
+fn custom_vecdeque() {
+    let mut v = VecDeque::with_capacity(4);
+    v.push_back(1);
+    v.push_back(2);
+    v.push_back(3);
+    v.push_back(4);
+    assert_vec!(v: 1, 2, 3, 4; 8);
+    let mut v = VecDeque::with_capacity(4);
+    v.push_back(3);
+    v.push_back(4);
+    v.push_front(2);
+    v.push_front(1);
+    assert_vec!(v: 1, 2, 3, 4; 8);
+    let mut v = VecDeque::with_capacity(4);
+    v.push_back(2);
+    v.push_front(1);
+    v.reserve(5);
+    assert_vec!(v: 1, 2; 8);
+    let mut v = VecDeque::with_capacity(4);
+    v.push_back(0);
+    v.pop_front();
+    v.push_back(1);
+    v.push_back(2);
+    v.push_back(3);
+    v.push_back(4);
+    assert_vec!(v: 1, 2, 3, 4; 8);
+    let mut v = VecDeque::with_capacity(4);
+    v.push_back(0);
+    v.pop_front();
+    v.push_back(1);
+    v.push_back(2);
+    v.reserve(5);
+    assert_vec!(v: 1, 2; 8);
+    let mut v = VecDeque::with_capacity(4);
+    v.push_back(0);
+    v.pop_front();
+    v.push_back(1);
+    v.push_back(2);
+    v.push_back(3);
+    v.reserve(5);
+    assert_vec!(v: 1, 2, 3; 8);
 }

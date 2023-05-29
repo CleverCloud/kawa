@@ -48,15 +48,15 @@ impl<T: AsBuffer> Kawa<T> {
     pub fn new(kind: Kind, storage: Buffer<T>) -> Self {
         Self {
             kind,
-            blocks: VecDeque::with_capacity(64),
-            out: VecDeque::with_capacity(128),
+            blocks: VecDeque::new(),
+            out: VecDeque::new(),
             expects: 0,
             parsing_phase: ParsingPhase::StatusLine,
             body_size: BodySize::Empty,
             storage,
             detached: DetachedBlocks {
                 status_line: StatusLine::Unknown,
-                jar: VecDeque::with_capacity(32),
+                jar: VecDeque::new(),
             },
         }
     }
