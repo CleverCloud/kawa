@@ -191,7 +191,7 @@ impl<T: AsBuffer> Kawa<T> {
 
     /// Completely reset the Kawa state and storage.
     pub fn clear(&mut self) {
-        self.storage.clear();
+        // self.storage.clear();
         self.blocks.clear();
         self.out.clear();
         self.detached.jar.clear();

@@ -23,6 +23,7 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
 
     for _ in 0..10000 {
         req.clear();
+        req.storage.clear();
         for char in REQ_LONG {
             req.storage.write(&[*char]).expect("write");
             black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
@@ -47,6 +48,7 @@ Connection: close\r\n\r\n";
 
     for _ in 0..10000 {
         req.clear();
+        req.storage.clear();
         for char in REQ_SHORT {
             req.storage.write(&[*char]).expect("write");
             black_box(h1::parse(&mut req, &mut h1::NoCallbacks));

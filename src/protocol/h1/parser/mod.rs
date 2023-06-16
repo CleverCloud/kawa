@@ -105,6 +105,9 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
         StatusLine::Response { code: 101, .. } => {
             kawa.body_size = BodySize::Length(0);
         }
+        StatusLine::Response { code: 103, .. } => {
+            kawa.body_size = BodySize::Length(0);
+        }
         _ => {}
     };
 }
