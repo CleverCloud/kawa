@@ -8,6 +8,7 @@ fn test_with_converter<T: AsBuffer, C: BlockConverter<T>>(
     fragment: &[u8],
     converter: &mut C,
 ) -> T {
+    println!("////////////////////////////////////////");
     let mut kawa = Kawa::new(kind, storage);
     let _ = kawa.storage.write(fragment).expect("WRITE");
     debug_kawa(&kawa);

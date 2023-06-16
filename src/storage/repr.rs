@@ -1,8 +1,13 @@
+use std::io::IoSlice;
 #[cfg(feature = "rc-alloc")]
 use std::rc::Rc;
-use std::{collections::VecDeque, io::IoSlice};
 
 use crate::storage::{AsBuffer, BlockConverter, Buffer};
+
+#[cfg(feature = "custom-vecdeque")]
+use crate::storage::VecDeque;
+#[cfg(not(feature = "custom-vecdeque"))]
+use std::collections::VecDeque;
 
 /// Intermediate representation for both H1 and H2 protocols
 ///
@@ -56,12 +61,9 @@ impl<T: AsBuffer> Kawa<T> {
         }
     }
 
-    /// Synchronize back all the Stores from blocks and out with the underlying data of Buffer.
+    /// Synchronize back all the Stores from out with the underlying data of Buffer.
     /// This is necessary after a Buffer::shift.
     pub fn push_left(&mut self, amount: u32) {
-        for block in &mut self.blocks {
-            block.push_left(amount);
-        }
         for block in &mut self.out {
             block.push_left(amount);
         }
@@ -112,6 +114,7 @@ impl<T: AsBuffer> Kawa<T> {
     /// call prepare before consume
     pub fn consume(&mut self, mut amount: usize) {
         assert!(self.blocks.is_empty());
+        assert!(self.detached.jar.is_empty());
         while let Some(store) = self.out.pop_front() {
             let (remaining, store) = store.consume(amount);
             amount = remaining;
@@ -167,7 +170,10 @@ impl<T: AsBuffer> Kawa<T> {
             | ParsingPhase::Chunks { .. }
             | ParsingPhase::Trailers
             | ParsingPhase::Terminated => true,
-            ParsingPhase::StatusLine | ParsingPhase::Headers | ParsingPhase::Error => false,
+            ParsingPhase::StatusLine
+            | ParsingPhase::Headers
+            | ParsingPhase::Cookies { .. }
+            | ParsingPhase::Error => false,
         }
     }
 
@@ -185,7 +191,7 @@ impl<T: AsBuffer> Kawa<T> {
 
     /// Completely reset the Kawa state and storage.
     pub fn clear(&mut self) {
-        self.storage.clear();
+        // self.storage.clear();
         self.blocks.clear();
         self.out.clear();
         self.detached.jar.clear();
@@ -206,6 +212,9 @@ pub enum Kind {
 pub enum ParsingPhase {
     StatusLine,
     Headers,
+    Cookies {
+        first: bool,
+    },
     Body,
     /// The "first" field is not directly used by Kawa, it is intended for parsers, mainly H1
     /// parsers that can benefit from distinguishing the start of the first chunk from the others.
@@ -237,9 +246,6 @@ pub enum Block {
 impl Block {
     pub fn push_left(&mut self, amount: u32) {
         match self {
-            Block::StatusLine | Block::Cookies => {
-                unimplemented!();
-            }
             Block::Header(header) => {
                 header.key.push_left(amount);
                 header.val.push_left(amount);
@@ -250,7 +256,7 @@ impl Block {
             Block::Chunk(chunk) => {
                 chunk.data.push_left(amount);
             }
-            Block::Flags(_) => {}
+            Block::StatusLine | Block::Cookies | Block::Flags(_) => {}
         }
     }
 }

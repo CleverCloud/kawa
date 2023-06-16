@@ -72,7 +72,9 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --release --verbose --all-features
+          args: --release --verbose
+        env:
+          RUSTFLAGS: -C target-feature=+sse4.2 -C target-cpu=native
   format:
     name: Format source code
     runs-on: ubuntu-latest
