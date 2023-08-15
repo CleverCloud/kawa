@@ -103,8 +103,10 @@ macro_rules! compile_lookup {
         mod $name {
             use $crate::h1::parser::primitives::{CharLookup, CharRanges, CharTable};
             pub const LOOKUP: CharLookup = $crate::make_char_lookup!($($t)*);
-            pub const RANGES: CharRanges = LOOKUP.ranges;
             pub const TABLE: CharTable = LOOKUP.table;
+            #[allow(dead_code)]
+            pub const RANGES: CharRanges = LOOKUP.ranges;
+            #[allow(dead_code)]
             pub const LENGTH: i32 = LOOKUP.len;
 
             #[inline]
@@ -115,11 +117,11 @@ macro_rules! compile_lookup {
             }
 
             #[inline]
-            #[allow(dead_code)]
+            #[cfg(feature="simd")]
             /// Returns the longest string that fits the rule (simd optimized)
             ///
             /// *Streaming version* will return a Err::Incomplete(Needed::Unknown) if the pattern reaches the end of the input.
-            pub fn take_while_simd(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
+            fn take_while_simd(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
                 use std::arch::x86_64::{
                     _mm_cmpestri, _mm_lddqu_si128, _mm_loadu_si128, _SIDD_CMP_RANGES,
                     _SIDD_LEAST_SIGNIFICANT, _SIDD_UBYTE_OPS,
@@ -173,9 +175,9 @@ macro_rules! compile_lookup {
             }
 
             #[inline]
-            #[allow(dead_code)]
+            #[cfg(feature="simd")]
             /// Returns the longest string that fits the rule (simd optimized)
-            pub fn take_while_complete_simd(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
+            fn take_while_complete_simd(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
                 use std::arch::x86_64::{
                     _mm_cmpestri, _mm_lddqu_si128, _mm_loadu_si128, _SIDD_CMP_RANGES,
                     _SIDD_LEAST_SIGNIFICANT, _SIDD_UBYTE_OPS,
@@ -222,6 +224,74 @@ macro_rules! compile_lookup {
                         input.get_unchecked(..i),
                     ))
                 }
+            }
+
+            #[inline]
+            #[allow(dead_code)]
+            /// Returns the longest string that fits the rule (not simd optimized)
+            ///
+            /// *Streaming version* will return a Err::Incomplete(Needed::Unknown) if the pattern reaches the end of the input.
+            pub fn take_while(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
+                let mut i = 0;
+                while i < input.len() {
+                    if unsafe { !TABLE.get_unchecked(*input.get_unchecked(i) as usize) } {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i == input.len() {
+                    return Err(nom::Err::Incomplete(nom::Needed::Unknown));
+                } else {
+                    unsafe {
+                        Ok((
+                            input.get_unchecked(i..),
+                            input.get_unchecked(..i),
+                        ))
+                    }
+                }
+            }
+
+            #[inline]
+            #[allow(dead_code)]
+            /// Returns the longest string that fits the rule (not simd optimized)
+            pub fn take_while_complete(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
+                let mut i = 0;
+                while i < input.len() {
+                    if unsafe { !TABLE.get_unchecked(*input.get_unchecked(i) as usize) } {
+                        break;
+                    }
+                    i += 1;
+                }
+                unsafe {
+                    Ok((
+                        input.get_unchecked(i..),
+                        input.get_unchecked(..i),
+                    ))
+                }
+            }
+
+            #[inline]
+            #[allow(dead_code)]
+            /// Returns the longest string that fits the rule (using simd if enabled)
+            ///
+            /// *Streaming version* will return a Err::Incomplete(Needed::Unknown) if the pattern reaches the end of the input.
+            pub fn take_while_fast(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
+                #[cfg(feature="simd")]
+                let result = take_while_simd(input);
+                #[cfg(not(feature="simd"))]
+                let result = take_while(input);
+                result
+            }
+
+            #[inline]
+            #[allow(dead_code)]
+            /// Returns the longest string that fits the rule (using simd if enabled)
+            pub fn take_while_complete_fast(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
+                #[cfg(feature="simd")]
+                let result = take_while_complete_simd(input);
+                #[cfg(not(feature="simd"))]
+                let result = take_while_complete(input);
+                result
             }
         }
     }
