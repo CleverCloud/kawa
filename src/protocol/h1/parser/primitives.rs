@@ -205,9 +205,9 @@ fn http_status(i: &[u8]) -> IResult<&[u8], (&[u8], u16)> {
 #[inline]
 #[allow(clippy::type_complexity)]
 pub fn parse_request_line(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8], Version)> {
-    let (i, method) = tchar::take_while_simd(i)?;
+    let (i, method) = tchar::take_while_fast(i)?;
     let (i, _) = space(i)?;
-    let (i, uri) = vchar::take_while_simd(i)?;
+    let (i, uri) = vchar::take_while_fast(i)?;
     let (i, _) = space(i)?;
     let (i, version) = http_version(i)?;
     let (i, _) = crlf(i)?;
@@ -224,7 +224,7 @@ pub fn parse_response_line(i: &[u8]) -> IResult<&[u8], (Version, &[u8], u16, &[u
     let (i, _) = space(i)?;
     let (i, (status, code)) = http_status(i)?;
     let (i, _) = space(i)?;
-    let (i, reason) = achar::take_while_simd(i)?;
+    let (i, reason) = achar::take_while_fast(i)?;
     let (i, _) = crlf(i)?;
     Ok((i, (version, status, code, reason)))
 }
@@ -236,13 +236,13 @@ pub fn parse_response_line(i: &[u8]) -> IResult<&[u8], (Version, &[u8], u16, &[u
 #[inline]
 #[allow(clippy::type_complexity)]
 pub fn parse_header_or_cookie(i: &[u8]) -> IResult<&[u8], Option<(&[u8], &[u8])>> {
-    let (i, key) = tchar::take_while_simd(i)?;
+    let (i, key) = tchar::take_while_fast(i)?;
     let (i, _) = tag(b":")(i)?;
     let (i, _) = take_while(is_space)(i)?;
     if compare_no_case(key, b"cookie") {
         return Ok((i, None));
     }
-    let (i, val) = achar::take_while_simd(i)?;
+    let (i, val) = achar::take_while_fast(i)?;
     let (i, _) = crlf(i)?;
     Ok((i, Some((key, val))))
 }
@@ -253,10 +253,10 @@ pub fn parse_header_or_cookie(i: &[u8]) -> IResult<&[u8], Option<(&[u8], &[u8])>
 /// example: `Content-Length: 42\r\n`
 #[inline]
 pub fn parse_header(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
-    let (i, key) = tchar::take_while_simd(i)?;
+    let (i, key) = tchar::take_while_fast(i)?;
     let (i, _) = tag(b":")(i)?;
     let (i, _) = take_while(is_space)(i)?;
-    let (i, val) = achar::take_while_simd(i)?;
+    let (i, val) = achar::take_while_fast(i)?;
     let (i, _) = crlf(i)?;
     Ok((i, (key, val)))
 }
@@ -277,8 +277,8 @@ pub fn parse_single_crumb(i: &[u8], first: bool) -> IResult<&[u8], (&[u8], &[u8]
     } else {
         i
     };
-    let (i, key) = ck_char::take_while_simd(i)?;
-    let (i, val) = opt(tuple((tag(b"="), cv_char::take_while_simd)))(i)?;
+    let (i, key) = ck_char::take_while_fast(i)?;
+    let (i, val) = opt(tuple((tag(b"="), cv_char::take_while_fast)))(i)?;
 
     match val {
         Some((_, val)) => Ok((i, (key, val))),
