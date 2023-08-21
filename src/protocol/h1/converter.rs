@@ -64,8 +64,8 @@ impl<T: AsBuffer> BlockConverter<T> for H1BlockConverter {
                 {
                     if !first {
                         kawa.out.push_back(OutBlock::Store(Store::Static(b"; ")));
-                        first = false;
                     }
+                    first = false;
                     kawa.out.push_back(OutBlock::Store(cookie.key));
                     kawa.out.push_back(OutBlock::Store(Store::Static(b"=")));
                     kawa.out.push_back(OutBlock::Store(cookie.val));
