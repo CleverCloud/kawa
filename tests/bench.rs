@@ -21,7 +21,7 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
     req.storage.write(REQ_LONG).expect("write");
     req.blocks.reserve(16);
     req.detached.jar.reserve(16);
-    for _ in 0..20_000_000 {
+    for _ in 0..10_000_000 {
         req.clear();
         req.storage.clear();
         req.storage.fill(REQ_LONG.len());
@@ -45,7 +45,7 @@ Connection: close\r\n\r\n";
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
     req.storage.write(REQ_SHORT).expect("write");
     req.blocks.reserve(16);
-    for _ in 0..20_000_000 {
+    for _ in 0..10_000_000 {
         req.clear();
         req.storage.clear();
         req.storage.fill(REQ_SHORT.len());

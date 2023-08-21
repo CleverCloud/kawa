@@ -99,13 +99,19 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
             *old_authority = authority;
             *old_path = path;
         }
-        StatusLine::Response { code: 100, .. } => {
-            kawa.body_size = BodySize::Length(0);
-        }
-        StatusLine::Response { code: 101, .. } => {
-            kawa.body_size = BodySize::Length(0);
-        }
-        StatusLine::Response { code: 103, .. } => {
+        // RFC 2616, 10.2.5:
+        // The 204 response MUST NOT include a message-body, and thus is always
+        // terminated by the first empty line after the header fields.
+        // RFC 2616, 10.3.5:
+        // The 304 response MUST NOT contain a message-body, and thus is always
+        // terminated by the first empty line after the header fields.
+        // RFC 2616, 10.1:
+        // This class of status code indicates a provisional response,
+        // consisting only of the Status-Line and optional headers, and is
+        // terminated by an empty line.
+        StatusLine::Response { code, .. }
+            if *code == 204 || *code == 304 || (*code >= 100 && *code < 200) =>
+        {
             kawa.body_size = BodySize::Length(0);
         }
         _ => {}

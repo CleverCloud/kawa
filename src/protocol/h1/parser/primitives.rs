@@ -121,7 +121,7 @@ compile_lookup!(vchar => [0x00..0x20, 0x7F..0xFF]);
 
     Visible characters
    SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
-    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ?, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, ?, 1, 1,
     @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
@@ -133,10 +133,10 @@ compile_lookup!(vchar => [0x00..0x20, 0x7F..0xFF]);
     p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
 
-    note: cookie values can contain equal signs, not keys. A key can't contain colons.
+    note: cookie values can contain equal signs and spaces, not keys. A key can't contain colons.
 */
 compile_lookup!(ck_char => [0x00..0x20, ';', '=', 0x7F..0xFF]);
-compile_lookup!(cv_char => [0x00..0x20, ';', 0x7F..0xFF]);
+compile_lookup!(cv_char => [0x00..0x1F, ';', 0x7F..0xFF]);
 
 /*
     Creates a achar module for parsing header values and http reasons.
