@@ -52,7 +52,9 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
 
     for block in &mut kawa.blocks {
         if let Block::Header(header) = block {
-            let Store::Slice(key) = &header.key else { unreachable!() };
+            let Store::Slice(key) = &header.key else {
+                unreachable!()
+            };
             let key = key.data(buf);
             if compare_no_case(key, b"host") {
                 // request line has higher priority than Host header

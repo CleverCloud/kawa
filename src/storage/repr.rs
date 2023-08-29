@@ -29,6 +29,10 @@ pub struct Kawa<T: AsBuffer> {
     pub expects: usize,
     pub parsing_phase: ParsingPhase,
     pub body_size: BodySize,
+
+    /// The "consumed" field is not directly used by Kawa, it is intended for proxies, mainly to
+    /// easily know if a request started to be transfered. Kawa is responsible for setting it.
+    pub consumed: bool,
 }
 
 /// Separate the content of the StatusLine and the crumbs from all the cookies from the stream of
@@ -58,6 +62,7 @@ impl<T: AsBuffer> Kawa<T> {
                 status_line: StatusLine::Unknown,
                 jar: VecDeque::new(),
             },
+            consumed: false,
         }
     }
 
@@ -115,6 +120,9 @@ impl<T: AsBuffer> Kawa<T> {
     pub fn consume(&mut self, mut amount: usize) {
         assert!(self.blocks.is_empty());
         assert!(self.detached.jar.is_empty());
+        if amount > 0 {
+            self.consumed = true;
+        }
         while let Some(store) = self.out.pop_front() {
             let (remaining, store) = store.consume(amount);
             amount = remaining;
@@ -197,6 +205,7 @@ impl<T: AsBuffer> Kawa<T> {
         self.detached.jar.clear();
         self.detached.status_line = StatusLine::Unknown;
         self.expects = 0;
+        self.consumed = false;
         self.parsing_phase = ParsingPhase::StatusLine;
         self.body_size = BodySize::Empty;
     }
@@ -543,9 +552,12 @@ impl Slice {
         }
     }
 
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 
