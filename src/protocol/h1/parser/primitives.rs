@@ -133,7 +133,7 @@ compile_lookup!(vchar => [0x00..0x20, 0x7F..0xFF]);
     p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
 
-    note: cookie values can contain equal signs and spaces, not keys. A key can't contain colons.
+    note: cookie values can contain equal signs and spaces, not keys.
 */
 compile_lookup!(ck_char => [0x00..0x20, ';', '=', 0x7F..0xFF]);
 compile_lookup!(cv_char => [0x00..0x1F, ';', 0x7F..0xFF]);
@@ -440,16 +440,16 @@ fn userinfo(i: &[u8]) -> IResult<&[u8], &[u8]> {
 /// server-wide:         OPTIONS * HTTP/1.1                                      -> (Empty, "*")
 /// origin:              OPTIONS /index.html                                     -> (Empty, "/index.html")
 /// absolute+empty path: OPTIONS http://www.example.org:8001 HTTP/1.1            -> ("www.example.org:8001", "*")
-/// absolute:            OPTIONS http://www.example.org:8001/index.html HTTP/1.1 -> ("www.example.org:8001", "/index.html")
+/// absolute+path:       OPTIONS http://www.example.org:8001/index.html HTTP/1.1 -> ("www.example.org:8001", "/index.html")
 /// ```
 #[inline]
 fn parse_asterisk_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
     if i == b"*" {
-        Ok((i, (Store::Static(b"*"), Store::Empty)))
+        Ok((i, (Store::Empty, Store::Static(b"*"))))
     } else if i[0] == b'/' {
         parse_origin_form(buffer, i)
     } else {
-        parse_absolute_form(buffer, i)
+        parse_absolute_form(buffer, i, b"*")
     }
 }
 /// ```txt
@@ -473,7 +473,11 @@ fn parse_origin_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store
 /// http://user:pass@www.example.org:8001/index.html?k=v#h -> ("www.example.org:8001", "/index.html?k=v#h")
 /// ```
 #[inline]
-fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Store, Store)> {
+fn parse_absolute_form<'a>(
+    buffer: &[u8],
+    i: &'a [u8],
+    empty_path_replacer: &'static [u8],
+) -> IResult<&'a [u8], (Store, Store)> {
     let (i, _scheme) = take_while_complete(is_scheme_char)(i)?;
     let (i, _) = tag_complete(b"://")(i)?;
     let (i, _userinfo) = opt(userinfo)(i)?;
@@ -481,7 +485,7 @@ fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Sto
 
     let authority = Store::new_slice(buffer, authority);
     let path = if path.is_empty() {
-        Store::Static(b"/")
+        Store::Static(empty_path_replacer)
     } else {
         Store::new_slice(buffer, path)
     };
@@ -489,7 +493,7 @@ fn parse_absolute_form<'a>(buffer: &[u8], i: &'a [u8]) -> IResult<&'a [u8], (Sto
 }
 
 #[inline]
-pub fn parse_url(method: &[u8], buffer: &[u8], i: &[u8]) -> Option<(Store, Store)> {
+pub fn parse_url(buffer: &[u8], method: &[u8], i: &[u8]) -> Option<(Store, Store)> {
     if i.is_empty() {
         return Some((Store::Empty, Store::Static(b"/")));
     }
@@ -500,10 +504,97 @@ pub fn parse_url(method: &[u8], buffer: &[u8], i: &[u8]) -> Option<(Store, Store
     } else if i[0] == b'/' {
         parse_origin_form(buffer, i)
     } else {
-        parse_authority_form(buffer, i)
+        parse_absolute_form(buffer, i, b"/")
     };
     match url {
         Ok((_, url)) => Some(url),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::from_utf8_unchecked;
+
+    fn test_url(method: &str, url: &str, expect: (&str, &str)) {
+        println!("{method} {url} HTTP/1.1");
+        let result = parse_url(url.as_bytes(), method.as_bytes(), url.as_bytes());
+        assert!(result.is_some());
+        let (authority, path) = result.unwrap();
+        assert_eq!(
+            (
+                authority
+                    .data_opt(url.as_bytes())
+                    .map_or("", |data| unsafe { from_utf8_unchecked(data) }),
+                path.data_opt(url.as_bytes())
+                    .map_or("", |data| unsafe { from_utf8_unchecked(data) })
+            ),
+            expect
+        );
+    }
+
+    #[test]
+    fn test_asterisk_form() {
+        // server-wide:
+        test_url("OPTIONS", "*", ("", "*"));
+        // origin
+        test_url("OPTIONS", "/index.html?k=v#h", ("", "/index.html?k=v#h"));
+        // absolute + empty path
+        test_url(
+            "OPTIONS",
+            "http://www.example.org:8001",
+            ("www.example.org:8001", "*"),
+        );
+        // absolute + path
+        test_url(
+            "OPTIONS",
+            "http://www.example.org:8001/index.html?k=v#h",
+            ("www.example.org:8001", "/index.html?k=v#h"),
+        );
+    }
+
+    #[test]
+    fn test_authority_form() {
+        // connect
+        test_url(
+            "CONNECT",
+            "www.example.org:8001",
+            ("www.example.org:8001", "/"),
+        );
+    }
+
+    #[test]
+    fn test_origin_form() {
+        test_url("GET", "/index.html?k=v#h", ("", "/index.html?k=v#h"));
+        test_url("OPTIONS", "/index.html?k=v#h", ("", "/index.html?k=v#h"));
+    }
+
+    #[test]
+    fn test_absolute_form() {
+        // empty path
+        test_url(
+            "GET",
+            "http://www.example.org:8001",
+            ("www.example.org:8001", "/"),
+        );
+        // empty path + query params
+        test_url(
+            "GET",
+            "http://www.example.org:8001?k=v#h",
+            ("www.example.org:8001", "?k=v#h"),
+        );
+        // empty path + path
+        test_url(
+            "GET",
+            "http://www.example.org:8001/index.html?k=v#h",
+            ("www.example.org:8001", "/index.html?k=v#h"),
+        );
+        // deprecated user-info + empty path + path
+        test_url(
+            "GET",
+            "http://user:pass@www.example.org:8001/index.html?k=v#h",
+            ("www.example.org:8001", "/index.html?k=v#h"),
+        );
     }
 }
