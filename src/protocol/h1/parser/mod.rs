@@ -132,7 +132,7 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
     loop {
         let buf = kawa.storage.buffer();
         let mut unparsed_buf = kawa.storage.unparsed_data();
-        'main: while !unparsed_buf.is_empty() {
+        while !unparsed_buf.is_empty() {
             match kawa.parsing_phase {
                 ParsingPhase::StatusLine => {
                     match kawa.kind {
@@ -210,7 +210,7 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                             unparsed_buf = i;
                         }
                         Err(NomError::Incomplete(_)) => {
-                            break 'main;
+                            break;
                         }
                         Err(_) => match crlf(unparsed_buf) {
                             Ok((i, _)) => {
@@ -219,7 +219,7 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                             }
                             Err(error) => {
                                 kawa.parsing_phase = handle_error(kawa, error);
-                                break 'main;
+                                break;
                             }
                         },
                     }
@@ -322,9 +322,11 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                         }
                     },
                 },
-                ParsingPhase::Terminated | ParsingPhase::Error => return,
+                ParsingPhase::Terminated | ParsingPhase::Error => break,
             };
         }
+        // it is absolutely essential that this line is called at the end of a parsing phase
+        // do not for any reason short circuit this line
         kawa.storage.head = buf.offset(unparsed_buf);
         if need_processing {
             process_headers(kawa);
