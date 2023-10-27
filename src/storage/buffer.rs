@@ -146,7 +146,7 @@ impl<T: AsBuffer> Buffer<T> {
         &mut self.mut_buffer()[range]
     }
 
-    pub fn used(&mut self) -> &[u8] {
+    pub fn used(&self) -> &[u8] {
         let range = ..self.end;
         &self.buffer()[range]
     }

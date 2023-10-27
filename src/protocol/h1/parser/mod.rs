@@ -1,10 +1,10 @@
 use std::cmp::min;
 use std::mem;
 
-use nom::{Err as NomError, Offset, ParseTo};
+use nom::{error::Error as NomError, Err as NomErr, Offset, ParseTo};
 
 /// Primitives used to parse http using nom and simd optimization when applicable
-mod primitives;
+pub mod primitives;
 
 use crate::{
     protocol::{
@@ -15,16 +15,40 @@ use crate::{
         utils::compare_no_case,
     },
     storage::{
-        AsBuffer, Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, Pair, ParsingPhase,
-        StatusLine, Store,
+        AsBuffer, Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, Pair, ParsingErrorKind,
+        ParsingPhase, StatusLine, Store,
     },
 };
 
 #[inline]
-fn handle_error<T: AsBuffer, E>(kawa: &Kawa<T>, error: NomError<E>) -> ParsingPhase {
+fn handle_error<T: AsBuffer>(kawa: &Kawa<T>, error: NomErr<NomError<&[u8]>>) -> ParsingPhase {
     match error {
-        NomError::Error(_) | NomError::Failure(_) => ParsingPhase::Error,
-        NomError::Incomplete(_) => kawa.parsing_phase,
+        NomErr::Error(error) | NomErr::Failure(error) => {
+            let index = kawa.storage.buffer().offset(error.input) as u32;
+            ParsingPhase::Error {
+                marker: kawa.parsing_phase.marker(),
+                kind: ParsingErrorKind::Consuming { index },
+            }
+        }
+        NomErr::Incomplete(_) => kawa.parsing_phase,
+    }
+}
+
+#[inline]
+fn handle_recovery_error<T: AsBuffer>(
+    kawa: &Kawa<T>,
+    primary_error: NomError<&[u8]>,
+    recovery_error: NomErr<NomError<&[u8]>>,
+) -> ParsingPhase {
+    match recovery_error {
+        NomErr::Error(_) | NomErr::Failure(_) => {
+            let index = kawa.storage.buffer().offset(primary_error.input) as u32;
+            ParsingPhase::Error {
+                marker: kawa.parsing_phase.marker(),
+                kind: ParsingErrorKind::Consuming { index },
+            }
+        }
+        NomErr::Incomplete(_) => kawa.parsing_phase,
     }
 }
 
@@ -42,7 +66,7 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
             match parse_url(buf, method, uri) {
                 Some((authority, path)) => (authority, path),
                 _ => {
-                    kawa.parsing_phase = ParsingPhase::Error;
+                    kawa.parsing_phase.error("Invalid URI".into());
                     return;
                 }
             }
@@ -66,14 +90,15 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 match kawa.body_size {
                     BodySize::Empty => {}
                     BodySize::Chunked | BodySize::Length(_) => {
-                        kawa.parsing_phase = ParsingPhase::Error;
+                        kawa.parsing_phase
+                            .error("Multiple length information".into());
                         return;
                     }
                 }
                 match header.val.data(buf).parse_to() {
                     Some(length) => kawa.body_size = BodySize::Length(length),
                     None => {
-                        kawa.parsing_phase = ParsingPhase::Error;
+                        kawa.parsing_phase.error("Invalid Content-Length".into());
                         return;
                     }
                 }
@@ -83,7 +108,8 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     match kawa.body_size {
                         BodySize::Empty => {}
                         BodySize::Chunked | BodySize::Length(_) => {
-                            kawa.parsing_phase = ParsingPhase::Error;
+                            kawa.parsing_phase
+                                .error("Multiple length information".into());
                             return;
                         }
                     }
@@ -184,20 +210,23 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                         kawa.parsing_phase = ParsingPhase::Cookies { first: true };
                         unparsed_buf = i;
                     }
-                    Err(NomError::Incomplete(_)) => {
+                    Err(NomErr::Incomplete(_)) => {
                         break;
                     }
-                    Err(_) => match crlf(unparsed_buf) {
-                        Ok((i, _)) => {
-                            need_processing = true;
-                            unparsed_buf = i;
-                            break;
+                    Err(NomErr::Error(error)) | Err(NomErr::Failure(error)) => {
+                        match crlf(unparsed_buf) {
+                            Ok((i, _)) => {
+                                need_processing = true;
+                                unparsed_buf = i;
+                                break;
+                            }
+                            Err(recovery_error) => {
+                                kawa.parsing_phase =
+                                    handle_recovery_error(kawa, error, recovery_error);
+                                break;
+                            }
                         }
-                        Err(error) => {
-                            kawa.parsing_phase = handle_error(kawa, error);
-                            break;
-                        }
-                    },
+                    }
                 },
                 ParsingPhase::Cookies { ref mut first } => {
                     match parse_single_crumb(unparsed_buf, *first) {
@@ -209,19 +238,22 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                             });
                             unparsed_buf = i;
                         }
-                        Err(NomError::Incomplete(_)) => {
+                        Err(NomErr::Incomplete(_)) => {
                             break;
                         }
-                        Err(_) => match crlf(unparsed_buf) {
-                            Ok((i, _)) => {
-                                kawa.parsing_phase = ParsingPhase::Headers;
-                                unparsed_buf = i;
+                        Err(NomErr::Error(error)) | Err(NomErr::Failure(error)) => {
+                            match crlf(unparsed_buf) {
+                                Ok((i, _)) => {
+                                    kawa.parsing_phase = ParsingPhase::Headers;
+                                    unparsed_buf = i;
+                                }
+                                Err(recovery_error) => {
+                                    kawa.parsing_phase =
+                                        handle_recovery_error(kawa, error, recovery_error);
+                                    break;
+                                }
                             }
-                            Err(error) => {
-                                kawa.parsing_phase = handle_error(kawa, error);
-                                break;
-                            }
-                        },
+                        }
                     }
                 }
                 ParsingPhase::Body => {
@@ -301,28 +333,31 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                         }));
                         unparsed_buf = i;
                     }
-                    Err(NomError::Incomplete(_)) => {
+                    Err(NomErr::Incomplete(_)) => {
                         break;
                     }
-                    Err(_) => match crlf(unparsed_buf) {
-                        Ok((i, _)) => {
-                            kawa.parsing_phase = ParsingPhase::Terminated;
-                            kawa.blocks.push_back(Block::Flags(Flags {
-                                end_body: false,
-                                end_chunk: false,
-                                end_header: true,
-                                end_stream: true,
-                            }));
-                            unparsed_buf = i;
-                            break;
+                    Err(NomErr::Error(error)) | Err(NomErr::Failure(error)) => {
+                        match crlf(unparsed_buf) {
+                            Ok((i, _)) => {
+                                kawa.parsing_phase = ParsingPhase::Terminated;
+                                kawa.blocks.push_back(Block::Flags(Flags {
+                                    end_body: false,
+                                    end_chunk: false,
+                                    end_header: true,
+                                    end_stream: true,
+                                }));
+                                unparsed_buf = i;
+                                break;
+                            }
+                            Err(recovery_error) => {
+                                kawa.parsing_phase =
+                                    handle_recovery_error(kawa, error, recovery_error);
+                                break;
+                            }
                         }
-                        Err(error) => {
-                            kawa.parsing_phase = handle_error(kawa, error);
-                            break;
-                        }
-                    },
+                    }
                 },
-                ParsingPhase::Terminated | ParsingPhase::Error => break,
+                ParsingPhase::Terminated | ParsingPhase::Error { .. } => break,
             };
         }
         // it is absolutely essential that this line is called at the end of a parsing phase

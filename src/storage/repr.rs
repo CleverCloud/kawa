@@ -181,12 +181,12 @@ impl<T: AsBuffer> Kawa<T> {
             ParsingPhase::StatusLine
             | ParsingPhase::Headers
             | ParsingPhase::Cookies { .. }
-            | ParsingPhase::Error => false,
+            | ParsingPhase::Error { .. } => false,
         }
     }
 
     pub fn is_error(&self) -> bool {
-        self.parsing_phase == ParsingPhase::Error
+        matches!(self.parsing_phase, ParsingPhase::Error { .. })
     }
 
     pub fn is_terminated(&self) -> bool {
@@ -218,6 +218,30 @@ pub enum Kind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParsingPhaseMarker {
+    StatusLine,
+    Headers,
+    Cookies,
+    Body,
+    Chunks,
+    Trailers,
+    Terminated,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParsingErrorKind {
+    Consuming { index: u32 },
+    Processing { message: &'static str },
+}
+
+impl From<&'static str> for ParsingErrorKind {
+    fn from(message: &'static str) -> Self {
+        Self::Processing { message }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParsingPhase {
     StatusLine,
     Headers,
@@ -232,7 +256,31 @@ pub enum ParsingPhase {
     },
     Trailers,
     Terminated,
-    Error,
+    Error {
+        marker: ParsingPhaseMarker,
+        kind: ParsingErrorKind,
+    },
+}
+
+impl ParsingPhase {
+    pub fn marker(&self) -> ParsingPhaseMarker {
+        match self {
+            ParsingPhase::StatusLine => ParsingPhaseMarker::StatusLine,
+            ParsingPhase::Headers => ParsingPhaseMarker::Headers,
+            ParsingPhase::Cookies { .. } => ParsingPhaseMarker::Cookies,
+            ParsingPhase::Body => ParsingPhaseMarker::Body,
+            ParsingPhase::Chunks { .. } => ParsingPhaseMarker::Chunks,
+            ParsingPhase::Trailers => ParsingPhaseMarker::Trailers,
+            ParsingPhase::Terminated => ParsingPhaseMarker::Terminated,
+            ParsingPhase::Error { .. } => ParsingPhaseMarker::Error,
+        }
+    }
+    pub fn error(&mut self, kind: ParsingErrorKind) {
+        *self = ParsingPhase::Error {
+            marker: self.marker(),
+            kind,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
