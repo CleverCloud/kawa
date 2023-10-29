@@ -15,8 +15,8 @@ use crate::{
         utils::compare_no_case,
     },
     storage::{
-        AsBuffer, Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, Pair, ParsingErrorKind,
-        ParsingPhase, StatusLine, Store,
+        AsBuffer, Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, Pair, ParsingPhase,
+        StatusLine, Store,
     },
 };
 
@@ -27,7 +27,7 @@ fn handle_error<T: AsBuffer>(kawa: &Kawa<T>, error: NomErr<NomError<&[u8]>>) -> 
             let index = kawa.storage.buffer().offset(error.input) as u32;
             ParsingPhase::Error {
                 marker: kawa.parsing_phase.marker(),
-                kind: ParsingErrorKind::Consuming { index },
+                kind: index.into(),
             }
         }
         NomErr::Incomplete(_) => kawa.parsing_phase,
@@ -45,7 +45,7 @@ fn handle_recovery_error<T: AsBuffer>(
             let index = kawa.storage.buffer().offset(primary_error.input) as u32;
             ParsingPhase::Error {
                 marker: kawa.parsing_phase.marker(),
-                kind: ParsingErrorKind::Consuming { index },
+                kind: index.into(),
             }
         }
         NomErr::Incomplete(_) => kawa.parsing_phase,

@@ -240,6 +240,11 @@ impl From<&'static str> for ParsingErrorKind {
         Self::Processing { message }
     }
 }
+impl From<u32> for ParsingErrorKind {
+    fn from(index: u32) -> Self {
+        ParsingErrorKind::Consuming { index }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParsingPhase {
