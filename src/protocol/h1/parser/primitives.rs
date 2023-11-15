@@ -57,6 +57,11 @@ impl std::ops::Deref for CharRanges {
 // STREAMING PARSERS
 //////////////////////////////////////////////////
 
+#[cfg(not(feature = "tolerant-parsing"))]
+const LAST_INVALID_CHAR: u8 = 0xFF;
+#[cfg(feature = "tolerant-parsing")]
+const LAST_INVALID_CHAR: u8 = 0x9F;
+
 /*
     Creates a tchar module for parsing header keys and http methods.
 
@@ -85,7 +90,7 @@ impl std::ops::Deref for CharRanges {
     parsers are strict enough to ensure all slices are valid UTF-8, so from_utf8_uncheck can be
     used on them.
 */
-compile_lookup!(tchar => [0x00..0x20, '('..')', '['..']', '{', '}', ',', ':'..'@', 0x7F..0xFF]);
+compile_lookup!(pub tchar => [0x00..0x20, '('..')', '['..']', '{', '}', ',', ':'..'@', 0x7F..LAST_INVALID_CHAR]);
 
 /*
     Creates a vchar module for preparsing URIs.
@@ -109,7 +114,7 @@ compile_lookup!(tchar => [0x00..0x20, '('..')', '['..']', '{', '}', ',', ':'..'@
     p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
 */
-compile_lookup!(vchar => [0x00..0x20, 0x7F..0xFF]);
+compile_lookup!(pub vchar => [0x00..0x20, 0x7F..LAST_INVALID_CHAR]);
 
 /*
     Creates a ck_char and cv_char module for parsing cookie keys and values respectively.
@@ -135,8 +140,8 @@ compile_lookup!(vchar => [0x00..0x20, 0x7F..0xFF]);
 
     note: cookie values can contain equal signs and spaces, not keys.
 */
-compile_lookup!(ck_char => [0x00..0x20, ';', '=', 0x7F..0xFF]);
-compile_lookup!(cv_char => [0x00..0x1F, ';', 0x7F..0xFF]);
+compile_lookup!(pub ck_char => [0x00..0x20, ';', '=', 0x7F..LAST_INVALID_CHAR]);
+compile_lookup!(pub cv_char => [0x00..0x1F, ';', 0x7F..LAST_INVALID_CHAR]);
 
 /*
     Creates a achar module for parsing header values and http reasons.
@@ -160,7 +165,7 @@ compile_lookup!(cv_char => [0x00..0x1F, ';', 0x7F..0xFF]);
     p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
 */
-compile_lookup!(achar => [0x00..0x08, 0x0A..0x1F, 0x7F..0xFF]);
+compile_lookup!(pub achar => [0x00..0x08, 0x0A..0x1F, 0x7F..LAST_INVALID_CHAR]);
 
 #[inline]
 fn space(i: &[u8]) -> IResult<&[u8], char> {

@@ -6,8 +6,8 @@ pub mod vecdeque;
 pub use buffer::{AsBuffer, Buffer};
 pub use debug::debug_kawa;
 pub use repr::{
-    Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, OutBlock, Pair, ParsingPhase,
-    StatusLine, Store, Version,
+    Block, BodySize, Chunk, ChunkHeader, Flags, Kawa, Kind, OutBlock, Pair, ParsingErrorKind,
+    ParsingPhase, ParsingPhaseMarker, StatusLine, Store, Version,
 };
 pub use vecdeque::VecDeque;
 

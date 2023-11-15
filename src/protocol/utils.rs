@@ -99,8 +99,10 @@ macro_rules! make_char_lookup {
 /// This macro an entire module which contains parsing utilities for a particular rule
 #[macro_export]
 macro_rules! compile_lookup {
-    ($name:ident => [$($t:tt)*]) => {
-        mod $name {
+    ($vis:vis $name:ident => [$($t:tt)*]) => {
+        $vis mod $name {
+            #[allow(unused_imports)]
+            use super::*;
             use $crate::h1::parser::primitives::{CharLookup, CharRanges, CharTable};
             pub const LOOKUP: CharLookup = $crate::make_char_lookup!($($t)*);
             pub const TABLE: CharTable = LOOKUP.table;
