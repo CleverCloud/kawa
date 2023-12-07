@@ -126,7 +126,7 @@ compile_lookup!(pub vchar => [0x00..0x20, 0x7F..LAST_INVALID_CHAR]);
 
     Visible characters
    SP  !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
-    ?, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, ?, 1, 1,
     @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
@@ -140,7 +140,7 @@ compile_lookup!(pub vchar => [0x00..0x20, 0x7F..LAST_INVALID_CHAR]);
 
     note: cookie values can contain equal signs and spaces, not keys.
 */
-compile_lookup!(pub ck_char => [0x00..0x20, ';', '=', 0x7F..LAST_INVALID_CHAR]);
+compile_lookup!(pub ck_char => [0x00..0x1F, ';', '=', 0x7F..LAST_INVALID_CHAR]);
 compile_lookup!(pub cv_char => [0x00..0x1F, ';', 0x7F..LAST_INVALID_CHAR]);
 
 /*
@@ -277,7 +277,7 @@ pub fn parse_header(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
 #[allow(clippy::type_complexity)]
 pub fn parse_single_crumb(i: &[u8], first: bool) -> IResult<&[u8], (&[u8], &[u8])> {
     let i = if !first {
-        let (i, _) = tag(b"; ")(i)?;
+        let (i, _) = tuple((tag(b";"), take_while(is_space)))(i)?;
         i
     } else {
         i
