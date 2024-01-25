@@ -87,30 +87,45 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 }
                 header.elide(); // Host header is elided
             } else if compare_no_case(key, b"content-length") {
+                let length = match header.val.data(buf).parse_to() {
+                    Some(length) => length,
+                    None => {
+                        kawa.parsing_phase
+                            .error("Invalid Content-Length field value".into());
+                        return;
+                    }
+                };
                 match kawa.body_size {
                     BodySize::Empty => {}
-                    BodySize::Chunked | BodySize::Length(_) => {
-                        kawa.parsing_phase
-                            .error("Multiple length information".into());
-                        return;
+                    BodySize::Chunked => {
+                        println!("WARNING: Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
+                        header.elide();
+                        continue;
+                    }
+                    BodySize::Length(previous_length) => {
+                        if previous_length != length {
+                            kawa.parsing_phase
+                                .error("Inconsistent Content-Length information".into());
+                            return;
+                        } else {
+                            header.elide();
+                        }
                     }
                 }
-                match header.val.data(buf).parse_to() {
-                    Some(length) => kawa.body_size = BodySize::Length(length),
-                    None => {
-                        kawa.parsing_phase.error("Invalid Content-Length".into());
-                        return;
-                    }
-                }
+                kawa.body_size = BodySize::Length(length);
             } else if compare_no_case(key, b"transfer-encoding") {
                 let val = header.val.data(buf);
-                if compare_no_case(val, b"chunked") {
+                const CHUNKED: &[u8] = b"chunked";
+                if val.len() >= CHUNKED.len()
+                    && compare_no_case(&val[val.len() - CHUNKED.len()..], CHUNKED)
+                {
                     match kawa.body_size {
                         BodySize::Empty => {}
-                        BodySize::Chunked | BodySize::Length(_) => {
-                            kawa.parsing_phase
-                                .error("Multiple length information".into());
-                            return;
+                        BodySize::Chunked => {
+                            println!("WARNING: Found multiple Transfer-Encoding");
+                        }
+                        BodySize::Length(_) => {
+                            println!("WARNING: Found both a Content-Length and a Transfer-Encoding, ignoring the former");
                         }
                     }
                     kawa.body_size = BodySize::Chunked;
