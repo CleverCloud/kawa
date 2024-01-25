@@ -1,5 +1,4 @@
 [package]
-authors = ["Eloi Démolis <eloi.demolis@clever-cloud.com>"]
 description = "Agnostic representation of HTTP/1.1 and HTTP/2.0 for parsing, generating and translating HTTP messages, with zero-copy, made for Sōzu."
 edition = "2021"
 keywords = ["http", "h1", "h2", "clevercloud"]
@@ -9,6 +8,12 @@ readme = "README.md"
 repository = "https://github.com/CleverCloud/kawa"
 rust-version = "1.66.1"
 version = "0.6.4"
+authors = [
+    "Eloi Démolis <eloi.demolis@clever-cloud.com>",
+    "Emmanuel Bosquet <emmanuel.bosquest@clever-cloud.com>",
+    "Florentin Dubois <florentin.dubois@clever-cloud.com>"
+]
+
 
 [dependencies]
 nom = "7.1.3"
