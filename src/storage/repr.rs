@@ -449,10 +449,9 @@ pub enum Store {
     Slice(Slice),
     Detached(Slice),
     Static(&'static [u8]),
-    #[cfg(feature = "rc-alloc")]
-    Alloc(Rc<[u8]>, u32),
-    #[cfg(not(feature = "rc-alloc"))]
     Alloc(Box<[u8]>, u32),
+    #[cfg(feature = "rc-alloc")]
+    Shared(Rc<[u8]>, u32),
 }
 
 impl Store {
@@ -464,14 +463,16 @@ impl Store {
         Store::Detached(Slice::new(buffer, data))
     }
 
-    pub fn new_vec(data: &[u8]) -> Store {
-        #[allow(clippy::useless_conversion)]
-        Store::Alloc(data.to_vec().into_boxed_slice().into(), 0)
+    pub fn from_vec(data: Vec<u8>) -> Store {
+        Store::Alloc(data.into_boxed_slice(), 0)
+    }
+
+    pub fn from_slice(data: &[u8]) -> Store {
+        Store::Alloc(data.to_vec().into_boxed_slice(), 0)
     }
 
     pub fn from_string(data: String) -> Store {
-        #[allow(clippy::useless_conversion)]
-        Store::Alloc(data.into_bytes().into_boxed_slice().into(), 0)
+        Store::Alloc(data.into_bytes().into_boxed_slice(), 0)
     }
 
     pub fn push_left(&mut self, amount: u32) {
@@ -496,6 +497,8 @@ impl Store {
             Store::Slice(slice) | Store::Detached(slice) => slice.data(buf),
             Store::Static(data) => data,
             Store::Alloc(data, index) => &data[*index as usize..],
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => &data[*index as usize..],
         }
     }
     pub fn data_opt<'a>(&'a self, buf: &'a [u8]) -> Option<&'a [u8]> {
@@ -504,25 +507,20 @@ impl Store {
             Store::Slice(slice) | Store::Detached(slice) => slice.data_opt(buf),
             Store::Static(data) => Some(data),
             Store::Alloc(data, index) => Some(&data[*index as usize..]),
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => Some(&data[*index as usize..]),
         }
     }
 
     pub fn capture(self, buf: &[u8]) -> Store {
         match self {
-            Store::Slice(slice) | Store::Detached(slice) => Store::new_vec(slice.data(buf)),
+            Store::Slice(slice) | Store::Detached(slice) => Store::from_slice(slice.data(buf)),
             _ => self,
         }
     }
 
     pub fn modify(&mut self, buf: &mut [u8], new_value: &[u8]) {
-        match &self {
-            Store::Empty | Store::Detached(_) | Store::Static(_) | Store::Alloc(..) => {
-                println!("WARNING: modification is not expected on: {self:?}")
-            }
-            Store::Slice(_) => {}
-        }
         match self {
-            Store::Empty | Store::Static(_) | Store::Alloc(..) => *self = Store::new_vec(new_value),
             Store::Slice(slice) | Store::Detached(slice) => {
                 let new_len = new_value.len();
                 if slice.len() >= new_len {
@@ -531,8 +529,12 @@ impl Store {
                     buf[start..end].copy_from_slice(new_value);
                     slice.len = new_len as u32;
                 } else {
-                    *self = Store::new_vec(new_value)
+                    *self = Store::from_slice(new_value)
                 }
+            }
+            _ => {
+                println!("WARNING: modification is not expected on: {self:?}");
+                *self = Store::from_slice(new_value)
             }
         }
     }
@@ -560,6 +562,14 @@ impl Store {
                     (amount - data.len() + index as usize, None)
                 } else {
                     (0, Some(Store::Alloc(data, index + amount as u32)))
+                }
+            }
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => {
+                if amount >= data.len() - index as usize {
+                    (amount - data.len() + index as usize, None)
+                } else {
+                    (0, Some(Store::Shared(data, index + amount as u32)))
                 }
             }
         }

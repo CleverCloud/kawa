@@ -216,6 +216,14 @@ impl Store {
                     to_utf8(Some(&data[*index as usize..]))
                 ))?;
             }
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => {
+                result.write_fmt(format_args!(
+                    "Store::Shared({:?}, {:?})",
+                    to_utf8(Some(&data[..*index as usize])),
+                    to_utf8(Some(&data[*index as usize..]))
+                ))?;
+            }
         }
         Ok(())
     }
