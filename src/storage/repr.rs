@@ -35,15 +35,6 @@ pub struct Kawa<T: AsBuffer> {
     pub consumed: bool,
 }
 
-/// Separate the content of the StatusLine and the crumbs from all the cookies from the stream of
-/// Blocks. It allows better indexing, persistance and reordering of data. However it is a double
-/// edge sword as it currently enables some unwanted/unsafe behavior such as Slice desync and over
-/// consuming.
-pub struct DetachedBlocks {
-    pub status_line: StatusLine,
-    pub jar: VecDeque<Pair>,
-}
-
 impl<T: AsBuffer> Kawa<T> {
     /// Create a new Kawa struct around a given storage.
     ///
@@ -211,7 +202,33 @@ impl<T: AsBuffer> Kawa<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+impl<T: AsBuffer + Clone> Clone for Kawa<T> {
+    fn clone(&self) -> Self {
+        Self {
+            storage: self.storage.clone(),
+            blocks: self.blocks.clone(),
+            out: self.out.clone(),
+            detached: self.detached.clone(),
+            kind: self.kind,
+            expects: self.expects,
+            parsing_phase: self.parsing_phase,
+            body_size: self.body_size,
+            consumed: self.consumed,
+        }
+    }
+}
+
+/// Separate the content of the StatusLine and the crumbs from all the cookies from the stream of
+/// Blocks. It allows better indexing, persistance and reordering of data. However it is a double
+/// edge sword as it currently enables some unwanted/unsafe behavior such as Slice desync and over
+/// consuming.
+#[derive(Debug, Clone)]
+pub struct DetachedBlocks {
+    pub status_line: StatusLine,
+    pub jar: VecDeque<Pair>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Request,
     Response,
@@ -295,7 +312,7 @@ pub enum BodySize {
     Length(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Block {
     StatusLine,
     Header(Pair),
@@ -370,7 +387,7 @@ impl StatusLine {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pair {
     pub key: Store,
     pub val: Store,
@@ -386,17 +403,17 @@ impl Pair {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChunkHeader {
     pub length: Store,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chunk {
     pub data: Store,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Flags {
     pub end_body: bool,
     pub end_chunk: bool,
@@ -404,7 +421,7 @@ pub struct Flags {
     pub end_stream: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OutBlock {
     Delimiter,
     Store(Store),

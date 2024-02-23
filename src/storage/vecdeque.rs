@@ -6,7 +6,7 @@ use std::{
     slice::from_raw_parts_mut,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VecDeque<T: Sized> {
     tail: usize,
     head: usize,
