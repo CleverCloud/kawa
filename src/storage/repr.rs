@@ -88,7 +88,7 @@ impl<T: AsBuffer> Kawa<T> {
     ///
     /// note: until you drop the resulting vector, Rust will prevent mutably borrowing Kawa as the
     /// IoSlices keep a reference in the out vector. As always, nothing is copied.
-    pub fn as_io_slice(&mut self) -> Vec<IoSlice> {
+    pub fn as_io_slice(&self) -> Vec<IoSlice> {
         self.out
             .iter()
             .take_while(|block| match block {
