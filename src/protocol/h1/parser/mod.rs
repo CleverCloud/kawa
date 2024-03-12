@@ -53,7 +53,7 @@ fn handle_recovery_error<T: AsBuffer>(
 }
 
 fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
-    let buf = kawa.storage.mut_buffer();
+    let buf = kawa.storage.buffer();
 
     let (mut authority, path) = match &kawa.detached.status_line {
         StatusLine::Request {

@@ -51,6 +51,17 @@ pub struct Buffer<T: AsBuffer> {
     pub buffer: T,
 }
 
+impl<T: AsBuffer + Clone> Clone for Buffer<T> {
+    fn clone(&self) -> Self {
+        Self {
+            start: self.start,
+            head: self.head,
+            end: self.end,
+            buffer: self.buffer.clone(),
+        }
+    }
+}
+
 impl<T: AsBuffer> Buffer<T> {
     pub fn new(buffer: T) -> Self {
         Self {

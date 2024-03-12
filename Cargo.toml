@@ -19,7 +19,7 @@ authors = [
 nom = "7.1.3"
 
 [features]
-default = ["simd", "tolerant-parsing"]
+default = ["simd", "tolerant-parsing", "rc-alloc"]
 rc-alloc = []
 custom-vecdeque = []
 simd = []

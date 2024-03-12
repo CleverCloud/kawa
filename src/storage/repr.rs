@@ -35,15 +35,6 @@ pub struct Kawa<T: AsBuffer> {
     pub consumed: bool,
 }
 
-/// Separate the content of the StatusLine and the crumbs from all the cookies from the stream of
-/// Blocks. It allows better indexing, persistance and reordering of data. However it is a double
-/// edge sword as it currently enables some unwanted/unsafe behavior such as Slice desync and over
-/// consuming.
-pub struct DetachedBlocks {
-    pub status_line: StatusLine,
-    pub jar: VecDeque<Pair>,
-}
-
 impl<T: AsBuffer> Kawa<T> {
     /// Create a new Kawa struct around a given storage.
     ///
@@ -97,7 +88,7 @@ impl<T: AsBuffer> Kawa<T> {
     ///
     /// note: until you drop the resulting vector, Rust will prevent mutably borrowing Kawa as the
     /// IoSlices keep a reference in the out vector. As always, nothing is copied.
-    pub fn as_io_slice(&mut self) -> Vec<IoSlice> {
+    pub fn as_io_slice(&self) -> Vec<IoSlice> {
         self.out
             .iter()
             .take_while(|block| match block {
@@ -211,7 +202,33 @@ impl<T: AsBuffer> Kawa<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+impl<T: AsBuffer + Clone> Clone for Kawa<T> {
+    fn clone(&self) -> Self {
+        Self {
+            storage: self.storage.clone(),
+            blocks: self.blocks.clone(),
+            out: self.out.clone(),
+            detached: self.detached.clone(),
+            kind: self.kind,
+            expects: self.expects,
+            parsing_phase: self.parsing_phase,
+            body_size: self.body_size,
+            consumed: self.consumed,
+        }
+    }
+}
+
+/// Separate the content of the StatusLine and the crumbs from all the cookies from the stream of
+/// Blocks. It allows better indexing, persistance and reordering of data. However it is a double
+/// edge sword as it currently enables some unwanted/unsafe behavior such as Slice desync and over
+/// consuming.
+#[derive(Debug, Clone)]
+pub struct DetachedBlocks {
+    pub status_line: StatusLine,
+    pub jar: VecDeque<Pair>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Request,
     Response,
@@ -295,7 +312,7 @@ pub enum BodySize {
     Length(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Block {
     StatusLine,
     Header(Pair),
@@ -370,7 +387,7 @@ impl StatusLine {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pair {
     pub key: Store,
     pub val: Store,
@@ -386,17 +403,17 @@ impl Pair {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChunkHeader {
     pub length: Store,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chunk {
     pub data: Store,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Flags {
     pub end_body: bool,
     pub end_chunk: bool,
@@ -404,7 +421,7 @@ pub struct Flags {
     pub end_stream: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OutBlock {
     Delimiter,
     Store(Store),
@@ -432,10 +449,9 @@ pub enum Store {
     Slice(Slice),
     Detached(Slice),
     Static(&'static [u8]),
-    #[cfg(feature = "rc-alloc")]
-    Alloc(Rc<[u8]>, u32),
-    #[cfg(not(feature = "rc-alloc"))]
     Alloc(Box<[u8]>, u32),
+    #[cfg(feature = "rc-alloc")]
+    Shared(Rc<[u8]>, u32),
 }
 
 impl Store {
@@ -447,14 +463,16 @@ impl Store {
         Store::Detached(Slice::new(buffer, data))
     }
 
-    pub fn new_vec(data: &[u8]) -> Store {
-        #[allow(clippy::useless_conversion)]
-        Store::Alloc(data.to_vec().into_boxed_slice().into(), 0)
+    pub fn from_vec(data: Vec<u8>) -> Store {
+        Store::Alloc(data.into_boxed_slice(), 0)
+    }
+
+    pub fn from_slice(data: &[u8]) -> Store {
+        Store::Alloc(data.to_vec().into_boxed_slice(), 0)
     }
 
     pub fn from_string(data: String) -> Store {
-        #[allow(clippy::useless_conversion)]
-        Store::Alloc(data.into_bytes().into_boxed_slice().into(), 0)
+        Store::Alloc(data.into_bytes().into_boxed_slice(), 0)
     }
 
     pub fn push_left(&mut self, amount: u32) {
@@ -479,6 +497,8 @@ impl Store {
             Store::Slice(slice) | Store::Detached(slice) => slice.data(buf),
             Store::Static(data) => data,
             Store::Alloc(data, index) => &data[*index as usize..],
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => &data[*index as usize..],
         }
     }
     pub fn data_opt<'a>(&'a self, buf: &'a [u8]) -> Option<&'a [u8]> {
@@ -487,25 +507,20 @@ impl Store {
             Store::Slice(slice) | Store::Detached(slice) => slice.data_opt(buf),
             Store::Static(data) => Some(data),
             Store::Alloc(data, index) => Some(&data[*index as usize..]),
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => Some(&data[*index as usize..]),
         }
     }
 
     pub fn capture(self, buf: &[u8]) -> Store {
         match self {
-            Store::Slice(slice) | Store::Detached(slice) => Store::new_vec(slice.data(buf)),
+            Store::Slice(slice) | Store::Detached(slice) => Store::from_slice(slice.data(buf)),
             _ => self,
         }
     }
 
     pub fn modify(&mut self, buf: &mut [u8], new_value: &[u8]) {
-        match &self {
-            Store::Empty | Store::Detached(_) | Store::Static(_) | Store::Alloc(..) => {
-                println!("WARNING: modification is not expected on: {self:?}")
-            }
-            Store::Slice(_) => {}
-        }
         match self {
-            Store::Empty | Store::Static(_) | Store::Alloc(..) => *self = Store::new_vec(new_value),
             Store::Slice(slice) | Store::Detached(slice) => {
                 let new_len = new_value.len();
                 if slice.len() >= new_len {
@@ -514,8 +529,12 @@ impl Store {
                     buf[start..end].copy_from_slice(new_value);
                     slice.len = new_len as u32;
                 } else {
-                    *self = Store::new_vec(new_value)
+                    *self = Store::from_slice(new_value)
                 }
+            }
+            _ => {
+                println!("WARNING: modification is not expected on: {self:?}");
+                *self = Store::from_slice(new_value)
             }
         }
     }
@@ -543,6 +562,14 @@ impl Store {
                     (amount - data.len() + index as usize, None)
                 } else {
                     (0, Some(Store::Alloc(data, index + amount as u32)))
+                }
+            }
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(data, index) => {
+                if amount >= data.len() - index as usize {
+                    (amount - data.len() + index as usize, None)
+                } else {
+                    (0, Some(Store::Shared(data, index + amount as u32)))
                 }
             }
         }
