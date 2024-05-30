@@ -8,7 +8,7 @@ use crate::{
 pub struct H2BlockConverter;
 
 impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
-    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) {
+    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) -> bool {
         match block {
             Block::StatusLine => match kawa.detached.status_line.pop() {
                 StatusLine::Request {
@@ -36,7 +36,7 @@ impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
             },
             Block::Cookies => {
                 if kawa.detached.jar.is_empty() {
-                    return;
+                    return true;
                 }
                 kawa.push_out(Store::Static(b"------------ HEADER"));
                 for cookie in kawa
@@ -72,7 +72,7 @@ impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
                         || compare_no_case(key, b"transfer-encoding")
                         || compare_no_case(key, b"upgrade")
                     {
-                        return;
+                        return true;
                     }
                 }
                 kawa.push_out(Store::Static(b"------------ HEADER\n"));
@@ -106,5 +106,6 @@ impl<T: AsBuffer> BlockConverter<T> for H2BlockConverter {
                 }
             }
         }
+        true
     }
 }

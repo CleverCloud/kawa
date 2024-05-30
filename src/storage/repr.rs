@@ -78,7 +78,9 @@ impl<T: AsBuffer> Kawa<T> {
     pub fn prepare<C: BlockConverter<T>>(&mut self, converter: &mut C) {
         converter.initialize(self);
         while let Some(block) = self.blocks.pop_front() {
-            converter.call(block, self);
+            if !converter.call(block, self) {
+                break;
+            }
         }
         converter.finalize(self);
     }
@@ -109,8 +111,8 @@ impl<T: AsBuffer> Kawa<T> {
     /// note: this function assumes blocks is empty! To respect this invariant you should always
     /// call prepare before consume
     pub fn consume(&mut self, mut amount: usize) {
-        assert!(self.blocks.is_empty());
-        assert!(self.detached.jar.is_empty());
+        // assert!(self.blocks.is_empty());
+        // assert!(self.detached.jar.is_empty());
         if amount > 0 {
             self.consumed = true;
         }
@@ -142,7 +144,12 @@ impl<T: AsBuffer> Kawa<T> {
                 return slice.start as usize;
             }
         }
-        self.storage.head
+        if self.blocks.is_empty() {
+            // conservative estimate
+            self.storage.head
+        } else {
+            self.storage.start
+        }
     }
 
     pub fn push_block(&mut self, block: Block) {
@@ -487,6 +494,17 @@ impl Store {
         }
     }
 
+    pub fn len(&self) -> usize {
+        match self {
+            Store::Empty => 0,
+            Store::Slice(s) | Store::Detached(s) => s.len(),
+            Store::Static(s) => s.len(),
+            Store::Alloc(s, i) => s.len() - *i as usize,
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(s, i) => s.len() - *i as usize,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         matches!(self, Store::Empty)
     }
@@ -536,6 +554,37 @@ impl Store {
                 println!("WARNING: modification is not expected on: {self:?}");
                 *self = Store::from_slice(new_value)
             }
+        }
+    }
+
+    pub fn split(self, at: usize) -> (Store, Store) {
+        let at32 = at as u32;
+        match self {
+            Store::Empty => (Store::Empty, Store::Empty),
+            Store::Slice(Slice { start, len }) => (
+                Store::Slice(Slice { start, len: at32 }),
+                Store::Slice(Slice {
+                    start: start + at32,
+                    len: len - at32,
+                }),
+            ),
+            Store::Detached(Slice { start, len }) => (
+                Store::Detached(Slice { start, len: at32 }),
+                Store::Detached(Slice {
+                    start: start + at32,
+                    len: len - at32,
+                }),
+            ),
+            Store::Static(s) => (Store::Static(&s[..at]), Store::Static(&s[at..])),
+            Store::Alloc(s, i) => (
+                Store::from_slice(&s[i as usize..i as usize + at]),
+                Store::Alloc(s, i + at32),
+            ),
+            #[cfg(feature = "rc-alloc")]
+            Store::Shared(s, i) => (
+                Store::from_slice(&s[i as usize..i as usize + at]),
+                Store::Shared(s, i + at32),
+            ),
         }
     }
 
