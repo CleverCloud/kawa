@@ -13,6 +13,6 @@ pub use vecdeque::VecDeque;
 
 pub trait BlockConverter<T: AsBuffer> {
     fn initialize(&mut self, _kawa: &mut Kawa<T>) {}
-    fn call(&mut self, block: Block, kawa: &mut Kawa<T>);
+    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) -> bool;
     fn finalize(&mut self, _kawa: &mut Kawa<T>) {}
 }
