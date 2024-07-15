@@ -16,7 +16,7 @@ impl Version {
 }
 
 impl<T: AsBuffer> BlockConverter<T> for H1BlockConverter {
-    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) {
+    fn call(&mut self, block: Block, kawa: &mut Kawa<T>) -> bool {
         match block {
             Block::StatusLine => match kawa.detached.status_line.pop() {
                 StatusLine::Request {
@@ -52,7 +52,7 @@ impl<T: AsBuffer> BlockConverter<T> for H1BlockConverter {
             },
             Block::Cookies => {
                 if kawa.detached.jar.is_empty() {
-                    return;
+                    return true;
                 }
                 kawa.push_out(Store::Static(b"Cookie: "));
                 let mut first = true;
@@ -104,5 +104,6 @@ impl<T: AsBuffer> BlockConverter<T> for H1BlockConverter {
                 }
             }
         }
+        true
     }
 }
