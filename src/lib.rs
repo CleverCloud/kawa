@@ -6,7 +6,7 @@ pub use storage::*;
 
 pub struct SliceBuffer<'a>(pub &'a mut [u8]);
 
-impl<'a> crate::AsBuffer for SliceBuffer<'a> {
+impl crate::AsBuffer for SliceBuffer<'_> {
     fn as_buffer(&self) -> &[u8] {
         self.0
     }
