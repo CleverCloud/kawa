@@ -87,19 +87,15 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 }
                 header.elide(); // Host header is elided
             } else if compare_no_case(key, b"content-length") {
-                let length = match header.val.data(buf).parse_to() {
-                    Some(length) => length,
-                    None => {
-                        kawa.parsing_phase
-                            .error("Invalid Content-Length field value".into());
-                        return;
-                    }
+                let Some(length) = header.val.data(buf).parse_to() else {
+                    kawa.parsing_phase
+                        .error("Invalid Content-Length field value".into());
+                    return;
                 };
                 match kawa.body_size {
                     BodySize::Empty => {}
                     BodySize::Chunked => {
-                        println!("WARNING: Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
-                        header.elide();
+                        // Header will get elided later
                         continue;
                     }
                     BodySize::Length(previous_length) => {
@@ -130,6 +126,22 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     }
                     kawa.body_size = BodySize::Chunked;
                 }
+            }
+        }
+    }
+    // If chunked, elide all `Content-Length`
+    if kawa.body_size == BodySize::Chunked {
+        for block in &mut kawa.blocks {
+            let Block::Header(header) = block else {
+                continue;
+            };
+            let Store::Slice(key) = &header.key else {
+                unreachable!()
+            };
+            let key = key.data(buf);
+            if compare_no_case(key, b"content-length") {
+                println!("WARNING: Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
+                header.elide();
             }
         }
     }
