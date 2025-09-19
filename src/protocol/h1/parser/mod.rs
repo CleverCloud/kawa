@@ -116,12 +116,9 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     && compare_no_case(&val[val.len() - CHUNKED.len()..], CHUNKED)
                 {
                     match kawa.body_size {
-                        BodySize::Empty => {}
+                        BodySize::Empty | BodySize::Length(_) => {}
                         BodySize::Chunked => {
                             println!("WARNING: Found multiple Transfer-Encoding");
-                        }
-                        BodySize::Length(_) => {
-                            println!("WARNING: Found both a Content-Length and a Transfer-Encoding, ignoring the former");
                         }
                     }
                     kawa.body_size = BodySize::Chunked;
