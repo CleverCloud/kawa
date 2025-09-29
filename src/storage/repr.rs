@@ -6,6 +6,7 @@ use crate::storage::{AsBuffer, BlockConverter, Buffer};
 
 #[cfg(feature = "custom-vecdeque")]
 use crate::storage::VecDeque;
+use log::warn;
 #[cfg(not(feature = "custom-vecdeque"))]
 use std::collections::VecDeque;
 
@@ -551,7 +552,7 @@ impl Store {
                 }
             }
             _ => {
-                println!("WARNING: modification is not expected on: {self:?}");
+                warn!("modification is not expected on: {self:?}");
                 *self = Store::from_slice(new_value)
             }
         }
