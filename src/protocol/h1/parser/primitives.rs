@@ -90,7 +90,7 @@ const LAST_INVALID_CHAR: u8 = 0x9F;
     parsers are strict enough to ensure all slices are valid UTF-8, so from_utf8_uncheck can be
     used on them.
 */
-compile_lookup!(pub tchar => [0x00..0x20, '('..')', '['..']', '{', '}', ',', ':'..'@', 0x7F..LAST_INVALID_CHAR]);
+compile_lookup!(pub tchar => [0x00..0x20, b'('..b')', b'['..b']', b'{', b'}', b',', b':'..b'@', 0x7F..LAST_INVALID_CHAR]);
 
 /*
     Creates a vchar module for preparsing URIs.
@@ -140,8 +140,8 @@ compile_lookup!(pub vchar => [0x00..0x20, 0x7F..LAST_INVALID_CHAR]);
 
     note: cookie values can contain equal signs and spaces, not keys.
 */
-compile_lookup!(pub ck_char => [0x00..0x1F, ';', '=', 0x7F..LAST_INVALID_CHAR]);
-compile_lookup!(pub cv_char => [0x00..0x1F, ';', 0x7F..LAST_INVALID_CHAR]);
+compile_lookup!(pub ck_char => [0x00..0x1F, b';', b'=', 0x7F..LAST_INVALID_CHAR]);
+compile_lookup!(pub cv_char => [0x00..0x1F, b';', 0x7F..LAST_INVALID_CHAR]);
 
 /*
     Creates a achar module for parsing header values and http reasons.
