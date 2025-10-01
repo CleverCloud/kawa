@@ -15,7 +15,7 @@ jobs:
       fail-fast: true
       matrix:
         rust:
-          - 1.66.1
+          - 1.80.0
           - stable
           - beta
           - nightly
@@ -39,7 +39,7 @@ jobs:
         # We do not need to build across all supported versions the minimum supported rust version is
         # enough. This check is here to detect conflict with the compiler feature flag.
         rust:
-          - 1.66.1
+          - 1.80.0
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -58,7 +58,7 @@ jobs:
       fail-fast: true
       matrix:
         rust:
-          - 1.66.1
+          - 1.80.0
           - stable
           - beta
           - nightly

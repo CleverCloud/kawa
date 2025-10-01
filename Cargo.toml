@@ -6,7 +6,7 @@ license-file = "LICENSE"
 name = "kawa"
 readme = "README.md"
 repository = "https://github.com/CleverCloud/kawa"
-rust-version = "1.82.0"
+rust-version = "1.80.0"
 version = "0.6.7"
 authors = [
     "Eloi Démolis <eloi.demolis@clever-cloud.com>",
