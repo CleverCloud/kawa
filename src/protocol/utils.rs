@@ -28,16 +28,16 @@ macro_rules! make_char_map {
 macro_rules! make_char_ranges {
     ($array:ident[$i:ident]) => {};
     ($array:ident[$i:ident] $lb:tt..$hb:tt, $($tail:tt)*) => {
-        $array[$i] = $lb as u8;
+        $array[$i] = $lb;
         $i += 1;
-        $array[$i] = $hb as u8;
+        $array[$i] = $hb;
         $i += 1;
         $crate::make_char_ranges!($array[$i] $($tail)*)
     };
     ($array:ident[$i:ident] $r:tt, $($tail:tt)*) => {
-        $array[$i] = $r as u8;
+        $array[$i] = $r;
         $i += 1;
-        $array[$i] = $r as u8;
+        $array[$i] = $r;
         $i += 1;
         $crate::make_char_ranges!($array[$i] $($tail)*)
     };
@@ -47,11 +47,11 @@ macro_rules! make_char_ranges {
 macro_rules! make_char_predicate {
     ($result:ident $c:ident) => {};
     ($result:ident $c:ident $lb:tt..$hb:tt, $($tail:tt)*) => {
-        $result = $result && ($c < ($lb as u8) || $c > ($hb as u8));
+        $result = $result && ($c < ($lb) || $c > ($hb));
         $crate::make_char_predicate!($result $c $($tail)*)
     };
     ($result:ident $c:ident $r:tt, $($tail:tt)*) => {
-        $result = $result && $c != ($r as u8);
+        $result = $result && $c != ($r);
         $crate::make_char_predicate!($result $c $($tail)*)
     };
 }

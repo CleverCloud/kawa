@@ -1,7 +1,7 @@
+use log::warn;
+use nom::{error::Error as NomError, Err as NomErr, Offset, ParseTo};
 use std::cmp::min;
 use std::mem;
-
-use nom::{error::Error as NomError, Err as NomErr, Offset, ParseTo};
 
 /// Primitives used to parse http using nom and simd optimization when applicable
 pub mod primitives;
@@ -98,7 +98,7 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 match kawa.body_size {
                     BodySize::Empty => {}
                     BodySize::Chunked => {
-                        println!("WARNING: Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
+                        warn!("Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
                         header.elide();
                         continue;
                     }
@@ -122,10 +122,10 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     match kawa.body_size {
                         BodySize::Empty => {}
                         BodySize::Chunked => {
-                            println!("WARNING: Found multiple Transfer-Encoding");
+                            warn!("Found multiple Transfer-Encoding");
                         }
                         BodySize::Length(_) => {
-                            println!("WARNING: Found both a Content-Length and a Transfer-Encoding, ignoring the former");
+                            warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
                         }
                     }
                     kawa.body_size = BodySize::Chunked;

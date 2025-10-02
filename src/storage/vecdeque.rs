@@ -157,7 +157,7 @@ impl<T: Sized> VecDeque<T> {
         }
     }
     #[inline]
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             remaining: self.len,
             index: self.tail,
@@ -167,7 +167,7 @@ impl<T: Sized> VecDeque<T> {
         }
     }
     #[inline]
-    pub fn iter_mut(&self) -> IterMut<T> {
+    pub fn iter_mut(&self) -> IterMut<'_, T> {
         IterMut {
             remaining: self.len,
             index: self.tail,
@@ -177,7 +177,7 @@ impl<T: Sized> VecDeque<T> {
         }
     }
     #[inline]
-    pub fn drain<R>(&mut self, _range: R) -> Drain<T>
+    pub fn drain<R>(&mut self, _range: R) -> Drain<'_, T>
     where
         R: RangeBounds<usize>,
     {
