@@ -271,7 +271,7 @@ impl<'a, T: Sized> Iterator for IterMut<'a, T> {
         Some(unsafe { &mut *self.ring.add(self.index) })
     }
 }
-impl<'a, T: Sized> Iterator for Drain<'a, T> {
+impl<T: Sized> Iterator for Drain<'_, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {

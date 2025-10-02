@@ -1,6 +1,6 @@
 use std::{io::Write, str::from_utf8};
 
-use kawa::{h1, BodySize, Buffer, Kawa, Kind, SliceBuffer};
+use kawa::{h1, Block, BodySize, Buffer, Kawa, Kind, SliceBuffer};
 
 #[test]
 fn compressed_chunked() {
@@ -54,6 +54,7 @@ fn multiple_length_information() {
 GET /image.jpg HTTP/1.1\r\n\
 Host: www.compressed.com\r\n\
 Content-Length: 3\r\n\
+Content-Length: 3\r\n\
 Transfer-Encoding: chunked\r\n\
 Transfer-Encoding: chunked\r\n\
 Content-Length: 4\r\n\r\n0\r\n\r\n";
@@ -63,9 +64,16 @@ Content-Length: 4\r\n\r\n0\r\n\r\n";
     req.storage.write(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
-    assert!(req.is_streaming());
     assert!(req.is_terminated());
+    assert!(req.is_streaming());
     assert!(req.storage.unparsed_data().is_empty());
+    for block in req.blocks {
+        if let Block::Header(header) = block {
+            if let Some(key) = header.key.data_opt(&buffer) {
+                assert_ne!(key, b"Content-Length");
+            }
+        }
+    }
 }
 
 #[test]
