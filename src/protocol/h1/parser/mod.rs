@@ -74,6 +74,7 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
         _ => (Store::Empty, Store::Empty),
     };
 
+    let mut content_length = None;
     for block in &mut kawa.blocks {
         if let Block::Header(header) = block {
             let Store::Slice(key) = &header.key else {
@@ -96,7 +97,10 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     }
                 };
                 match kawa.body_size {
-                    BodySize::Empty => {}
+                    BodySize::Empty => {
+                        content_length = Some(header);
+                        kawa.body_size = BodySize::Length(length);
+                    }
                     BodySize::Chunked => {
                         warn!("Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
                         header.elide();
@@ -112,7 +116,6 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                         }
                     }
                 }
-                kawa.body_size = BodySize::Length(length);
             } else if compare_no_case(key, b"transfer-encoding") {
                 let val = header.val.data(buf);
                 const CHUNKED: &[u8] = b"chunked";
@@ -126,6 +129,9 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                         }
                         BodySize::Length(_) => {
                             warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
+                            if let Some(content_length) = content_length.take() {
+                                content_length.elide();
+                            }
                         }
                     }
                     kawa.body_size = BodySize::Chunked;
