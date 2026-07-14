@@ -98,6 +98,17 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
     };
 
     let mut content_length = None;
+    // Tracks whether the MOST RECENTLY seen Transfer-Encoding field line, on
+    // its own, does NOT end in the chunked coding. RFC 9110 §5.3 makes
+    // repeated Transfer-Encoding field lines equivalent to a single
+    // comma-joined value in order, so the combined final transfer-coding is
+    // the final coding of the LAST such line -- a split "gzip" then
+    // "chunked" is the same wire semantics as one "gzip, chunked" line and
+    // must not be rejected on the first line. The reject decision below is
+    // therefore deferred until every header block has been walked, using
+    // only the last-seen line's outcome; a later chunked-final line clears
+    // this flag and applies chunked framing immediately (see the loop body).
+    let mut transfer_encoding_pending_reject = false;
     for block in &mut kawa.blocks {
         if let Block::Header(header) = block {
             let Store::Slice(key) = &header.key else {
@@ -142,43 +153,55 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
             } else if compare_no_case(key, b"transfer-encoding") {
                 let val = header.val.data(buf);
                 // RFC 9112 §6.1: "the chunked transfer coding MUST be
-                // applied last" -- an intermediary can only trust
-                // Transfer-Encoding for message framing when "chunked" is
-                // the FINAL transfer-coding in the (possibly
+                // applied last" -- chunked framing is only selected when
+                // "chunked" is the FINAL transfer-coding in the (possibly
                 // comma-separated) value, once OWS (space/HTAB, RFC 9110
                 // §5.6.3) around the value and each token is trimmed.
-                // RFC 9112 §6.3 mandates rejecting a request whose
-                // Transfer-Encoding is present but does not end in
-                // chunked, because the message body length can then not
-                // be determined reliably. Closes sozu-proxy/sozu#726: the
-                // previous suffix-only, untrimmed check let a value like
-                // "chunked\t" (trailing tab) neither match nor error,
-                // leaving Content-Length framing active while the
-                // malformed Transfer-Encoding header stayed un-elided --
-                // i.e. both framing headers were forwarded to the
-                // backend. It also let "xchunked" false-positive as
-                // chunked.
-                if !ends_with_chunked_coding(val) {
-                    kawa.parsing_phase.error(
-                        "Transfer-Encoding present without chunked as the final coding".into(),
-                    );
-                    return;
-                }
-                match kawa.body_size {
-                    BodySize::Empty => {}
-                    BodySize::Chunked => {
-                        warn!("Found multiple Transfer-Encoding");
-                    }
-                    BodySize::Length(_) => {
-                        warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
-                        if let Some(content_length) = content_length.take() {
-                            content_length.elide();
+                // Closes sozu-proxy/sozu#726: the previous suffix-only,
+                // untrimmed check let a value like "chunked\t" (trailing
+                // tab) neither match nor error, leaving Content-Length
+                // framing active while the malformed Transfer-Encoding
+                // header stayed un-elided -- i.e. both framing headers
+                // were forwarded to the backend. It also let "xchunked"
+                // false-positive as chunked.
+                if ends_with_chunked_coding(val) {
+                    transfer_encoding_pending_reject = false;
+                    match kawa.body_size {
+                        BodySize::Empty => {}
+                        BodySize::Chunked => {
+                            warn!("Found multiple Transfer-Encoding");
+                        }
+                        BodySize::Length(_) => {
+                            warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
+                            if let Some(content_length) = content_length.take() {
+                                content_length.elide();
+                            }
                         }
                     }
+                    kawa.body_size = BodySize::Chunked;
+                } else {
+                    // This line's own final coding is not chunked. It may
+                    // still be superseded by a later Transfer-Encoding
+                    // field line (the split-header case above), so defer
+                    // the reject decision instead of erroring here.
+                    transfer_encoding_pending_reject = true;
                 }
-                kawa.body_size = BodySize::Chunked;
             }
         }
+    }
+    if transfer_encoding_pending_reject && kawa.kind == Kind::Request {
+        // RFC 9112 §6.3 mandates rejecting a REQUEST whose
+        // Transfer-Encoding is present but does not end in chunked,
+        // because the message body length can then not be determined
+        // reliably. This rule does not apply to responses: a response
+        // with a non-chunked-final Transfer-Encoding (e.g. "gzip" alone)
+        // is spec-valid and its body is close-delimited (read until
+        // connection close) instead of an error, so body_size is left
+        // exactly as Content-Length processing above produced it
+        // (Length(n) or Empty).
+        kawa.parsing_phase
+            .error("Transfer-Encoding present without chunked as the final coding".into());
+        return;
     }
     match &mut kawa.detached.status_line {
         StatusLine::Request {

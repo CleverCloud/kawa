@@ -204,6 +204,90 @@ Transfer-Encoding: chunked\t\r\n\r\n0\r\n\r\n";
 }
 
 #[test]
+fn transfer_encoding_split_header_lines() {
+    // RFC 9110 §5.3: repeated Transfer-Encoding field lines are
+    // equivalent to a single comma-joined value, in the order the lines
+    // appear on the wire. Regression test: rejecting as soon as one
+    // Transfer-Encoding header BLOCK doesn't end in chunked (instead of
+    // waiting for the combined/last value) broke split Transfer-Encoding
+    // whose final line is chunked.
+    let mut buffer = vec![0; 4096];
+
+    // "gzip" then "chunked" on separate lines == "gzip, chunked" as a
+    // single value -> chunked is the final coding -> valid chunked
+    // framing, not an error.
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: gzip\r\n\
+Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert_eq!(req.body_size, BodySize::Chunked);
+        assert!(!req.is_error());
+        assert!(req.is_terminated());
+    }
+
+    // "chunked" then "identity" on separate lines == "chunked, identity"
+    // as a single value -> chunked is NOT the final coding -> reject
+    // (RFC 9112 §6.3), even though the FIRST line alone ends in chunked.
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: chunked\r\n\
+Transfer-Encoding: identity\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(req.is_error());
+    }
+}
+
+#[test]
+fn transfer_encoding_response_non_chunked_final_is_not_an_error() {
+    // RFC 9112 §6.3's "reject a message whose Transfer-Encoding does not
+    // end in chunked" is a REQUEST-only rule: the server cannot ask the
+    // client to retry with a different framing, so an unreliable request
+    // body length must be rejected outright. A RESPONSE with a
+    // Transfer-Encoding that does not end in chunked (e.g. a lone
+    // "gzip") is spec-valid instead: the body is close-delimited (read
+    // until the connection closes) rather than an error.
+    let mut buffer = vec![0; 4096];
+
+    {
+        const RESPONSE: &[u8] = b"\
+HTTP/1.1 200 OK\r\n\
+Transfer-Encoding: gzip\r\n\r\n";
+        let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
+        resp.storage.write(RESPONSE).expect("write");
+        h1::parse(&mut resp, &mut h1::NoCallbacks);
+        assert!(!resp.is_error());
+        // No Content-Length was present, so the pre-fix reference value
+        // is BodySize::Empty (close-delimited: read until connection
+        // close), not merely "anything other than Chunked".
+        assert_eq!(resp.body_size, BodySize::Empty);
+    }
+
+    // A response whose Transfer-Encoding DOES end in chunked still gets
+    // chunked framing -- the request-only reject rule above must not
+    // suppress genuinely valid chunked responses.
+    {
+        const RESPONSE: &[u8] = b"\
+HTTP/1.1 200 OK\r\n\
+Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+        let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
+        resp.storage.write(RESPONSE).expect("write");
+        h1::parse(&mut resp, &mut h1::NoCallbacks);
+        assert_eq!(resp.body_size, BodySize::Chunked);
+        assert!(!resp.is_error());
+        assert!(resp.is_terminated());
+    }
+}
+
+#[test]
 fn malformed_cookies_separator() {
     const REQUEST: &'static [u8] = b"\
 GET /cookies HTTP/1.1\r\n\
