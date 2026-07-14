@@ -77,6 +77,133 @@ Content-Length: 4\r\n\r\n0\r\n\r\n";
 }
 
 #[test]
+fn transfer_encoding_ows_and_final_coding() {
+    // RFC 9112 §6.1 / RFC 9110 §5.6.3: chunked framing is selected only
+    // when "chunked" is the FINAL transfer-coding, after trimming OWS
+    // (SP/HTAB) from the header value and from each comma-separated
+    // token. This is a regression test for sozu-proxy/sozu#726: the
+    // pre-fix code did a suffix-only, untrimmed compare, so a value like
+    // "chunked\t" (trailing tab) neither matched nor was rejected, and
+    // Content-Length framing silently stayed active while the malformed
+    // Transfer-Encoding header was left un-elided -- both framing headers
+    // reached the backend.
+    let mut buffer = vec![0; 4096];
+
+    // 1. plain chunked
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert_eq!(req.body_size, BodySize::Chunked);
+        assert!(!req.is_error());
+    }
+
+    // 2. trailing tab -- the #726 regression case
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: chunked\t\r\n\r\n0\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert_eq!(req.body_size, BodySize::Chunked);
+        assert!(!req.is_error());
+    }
+
+    // 3. surrounding OWS
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding:  chunked \r\n\r\n0\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert_eq!(req.body_size, BodySize::Chunked);
+        assert!(!req.is_error());
+    }
+
+    // 4. "gzip, chunked" -- chunked is the final coding
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert_eq!(req.body_size, BodySize::Chunked);
+        assert!(!req.is_error());
+    }
+
+    // 5. "chunked, gzip" -- chunked is NOT the final coding -> reject
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: chunked, gzip\r\n\r\nabc";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(req.is_error());
+    }
+
+    // 6. "identity" -- not chunked at all -> reject
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: identity\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(req.is_error());
+    }
+
+    // 7. "xchunked" -- false positive under the old suffix-only check -> reject
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: xchunked\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(req.is_error());
+    }
+}
+
+#[test]
+fn transfer_encoding_ows_elides_content_length() {
+    // "Transfer-Encoding: chunked\t" (trailing tab) alongside a
+    // Content-Length must still select chunked framing AND elide the
+    // Content-Length, so only one framing header reaches the backend.
+    const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Content-Length: 3\r\n\
+Transfer-Encoding: chunked\t\r\n\r\n0\r\n\r\n";
+    let mut buffer = vec![0; 4096];
+    let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+    req.storage.write(REQUEST).expect("write");
+    h1::parse(&mut req, &mut h1::NoCallbacks);
+    assert_eq!(req.body_size, BodySize::Chunked);
+    assert!(!req.is_error());
+    for block in &req.blocks {
+        if let Block::Header(header) = block {
+            if let Some(key) = header.key.data_opt(&buffer) {
+                assert_ne!(key, b"Content-Length");
+            }
+        }
+    }
+}
+
+#[test]
 fn malformed_cookies_separator() {
     const REQUEST: &'static [u8] = b"\
 GET /cookies HTTP/1.1\r\n\

@@ -52,6 +52,29 @@ fn handle_recovery_error<T: AsBuffer>(
     }
 }
 
+/// Trims leading and trailing optional whitespace (OWS) as defined by
+/// RFC 9110 §5.6.3: space (0x20) and horizontal tab (0x09).
+#[inline]
+fn trim_ows(mut data: &[u8]) -> &[u8] {
+    while let [b' ' | b'\t', rest @ ..] = data {
+        data = rest;
+    }
+    while let [rest @ .., b' ' | b'\t'] = data {
+        data = rest;
+    }
+    data
+}
+
+/// Returns true if the FINAL comma-separated transfer-coding token of a
+/// Transfer-Encoding header value is `chunked`, case-insensitively, once
+/// OWS has been trimmed from around the token (RFC 9112 §6.1).
+#[inline]
+fn ends_with_chunked_coding(val: &[u8]) -> bool {
+    const CHUNKED: &[u8] = b"chunked";
+    let last_token = val.rsplit(|&b| b == b',').next().unwrap_or(val);
+    compare_no_case(trim_ows(last_token), CHUNKED)
+}
+
 fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
     let buf = kawa.storage.buffer();
 
@@ -118,24 +141,42 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 }
             } else if compare_no_case(key, b"transfer-encoding") {
                 let val = header.val.data(buf);
-                const CHUNKED: &[u8] = b"chunked";
-                if val.len() >= CHUNKED.len()
-                    && compare_no_case(&val[val.len() - CHUNKED.len()..], CHUNKED)
-                {
-                    match kawa.body_size {
-                        BodySize::Empty => {}
-                        BodySize::Chunked => {
-                            warn!("Found multiple Transfer-Encoding");
-                        }
-                        BodySize::Length(_) => {
-                            warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
-                            if let Some(content_length) = content_length.take() {
-                                content_length.elide();
-                            }
+                // RFC 9112 §6.1: "the chunked transfer coding MUST be
+                // applied last" -- an intermediary can only trust
+                // Transfer-Encoding for message framing when "chunked" is
+                // the FINAL transfer-coding in the (possibly
+                // comma-separated) value, once OWS (space/HTAB, RFC 9110
+                // §5.6.3) around the value and each token is trimmed.
+                // RFC 9112 §6.3 mandates rejecting a request whose
+                // Transfer-Encoding is present but does not end in
+                // chunked, because the message body length can then not
+                // be determined reliably. Closes sozu-proxy/sozu#726: the
+                // previous suffix-only, untrimmed check let a value like
+                // "chunked\t" (trailing tab) neither match nor error,
+                // leaving Content-Length framing active while the
+                // malformed Transfer-Encoding header stayed un-elided --
+                // i.e. both framing headers were forwarded to the
+                // backend. It also let "xchunked" false-positive as
+                // chunked.
+                if !ends_with_chunked_coding(val) {
+                    kawa.parsing_phase.error(
+                        "Transfer-Encoding present without chunked as the final coding".into(),
+                    );
+                    return;
+                }
+                match kawa.body_size {
+                    BodySize::Empty => {}
+                    BodySize::Chunked => {
+                        warn!("Found multiple Transfer-Encoding");
+                    }
+                    BodySize::Length(_) => {
+                        warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
+                        if let Some(content_length) = content_length.take() {
+                            content_length.elide();
                         }
                     }
-                    kawa.body_size = BodySize::Chunked;
                 }
+                kawa.body_size = BodySize::Chunked;
             }
         }
     }
