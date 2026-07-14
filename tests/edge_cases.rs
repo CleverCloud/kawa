@@ -285,6 +285,23 @@ Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
         assert!(!resp.is_error());
         assert!(resp.is_terminated());
     }
+
+    // Regression (the finding): a response whose split Transfer-Encoding lines
+    // are "chunked" then "identity" combines to "chunked, identity" -- chunked
+    // is NOT the final coding, so the body is close-delimited, NOT chunked. The
+    // earlier "chunked" line must not latch chunked framing (the prior fix left
+    // body_size stuck at Chunked here).
+    {
+        const RESPONSE: &[u8] = b"\
+HTTP/1.1 200 OK\r\n\
+Transfer-Encoding: chunked\r\n\
+Transfer-Encoding: identity\r\n\r\n";
+        let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
+        resp.storage.write(RESPONSE).expect("write");
+        h1::parse(&mut resp, &mut h1::NoCallbacks);
+        assert!(!resp.is_error());
+        assert_eq!(resp.body_size, BodySize::Empty);
+    }
 }
 
 #[test]
