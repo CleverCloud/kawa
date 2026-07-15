@@ -10,7 +10,7 @@ fn test_with_converter<T: AsBuffer, C: BlockConverter<T>>(
 ) -> T {
     println!("////////////////////////////////////////");
     let mut kawa = Kawa::new(kind, storage);
-    let _ = kawa.storage.write(fragment).expect("WRITE");
+    kawa.storage.write_all(fragment).expect("WRITE");
     debug_kawa(&kawa);
 
     h1::parse(&mut kawa, &mut h1::NoCallbacks);
@@ -38,8 +38,7 @@ fn test<T: AsBuffer>(kind: Kind, storage: T, fragment: &[u8]) -> T {
     let buffer = Buffer::new(storage);
     let storage = test_with_converter(kind, buffer, fragment, &mut h1::BlockConverter);
     let buffer = Buffer::new(storage);
-    let storage = test_with_converter(kind, buffer, fragment, &mut h2::BlockConverter);
-    storage
+    test_with_converter(kind, buffer, fragment, &mut h2::BlockConverter)
 }
 
 fn test_partial_with_converter<T: AsBuffer, C: BlockConverter<T>>(
@@ -53,7 +52,7 @@ fn test_partial_with_converter<T: AsBuffer, C: BlockConverter<T>>(
 
     while !fragments.is_empty() {
         let fragment = fragments.remove(0);
-        let _ = kawa.storage.write(fragment).expect("WRITE");
+        kawa.storage.write_all(fragment).expect("WRITE");
 
         let buffer = unsafe { std::str::from_utf8_unchecked(kawa.storage.used()) };
         println!("===============================\n{buffer}\n===============================");
@@ -84,13 +83,12 @@ fn test_partial<T: AsBuffer>(kind: Kind, storage: T, fragments: Vec<&[u8]>) -> T
         fragments.clone(),
         &mut h1::BlockConverter,
     );
-    let storage = test_partial_with_converter(
+    test_partial_with_converter(
         kind,
         Buffer::new(storage),
         fragments,
         &mut h2::BlockConverter,
-    );
-    storage
+    )
 }
 
 #[test]

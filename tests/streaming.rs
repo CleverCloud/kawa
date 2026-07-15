@@ -4,7 +4,7 @@ use kawa::{h1, Buffer, Kawa, Kind, SliceBuffer};
 
 #[test]
 fn bench_long() {
-    const REQ_LONG: &'static [u8] = b"\
+    const REQ_LONG: &[u8] = b"\
 GET /wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg HTTP/1.1\r\n\
 Host: www.kittyhell.com\r\n\
 User-Agent: Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9\r\n\
@@ -25,19 +25,19 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
         req.clear();
         req.storage.clear();
         for char in REQ_LONG {
-            req.storage.write(&[*char]).expect("write");
-            black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+            req.storage.write_all(&[*char]).expect("write");
+            h1::parse(black_box(&mut req), &mut h1::NoCallbacks);
         }
         if !req.is_main_phase() {
             kawa::debug_kawa(&req);
-            assert!(false);
+            panic!("parser did not reach the main phase");
         }
     }
 }
 
 #[test]
 fn bench_short() {
-    const REQ_SHORT: &'static [u8] = b"\
+    const REQ_SHORT: &[u8] = b"\
 GET / HTTP/1.0\r\n\
 Host: example.com\r\n\
 Connection: close\r\n\r\n";
@@ -50,12 +50,12 @@ Connection: close\r\n\r\n";
         req.clear();
         req.storage.clear();
         for char in REQ_SHORT {
-            req.storage.write(&[*char]).expect("write");
-            black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+            req.storage.write_all(&[*char]).expect("write");
+            h1::parse(black_box(&mut req), &mut h1::NoCallbacks);
         }
         if !req.is_main_phase() {
             kawa::debug_kawa(&req);
-            assert!(false);
+            panic!("parser did not reach the main phase");
         }
     }
 }
