@@ -119,7 +119,11 @@ macro_rules! compile_lookup {
             }
 
             #[inline]
-            #[cfg(all(feature="simd", target_feature="sse3"))]
+            #[cfg(all(
+                feature = "simd",
+                target_arch = "x86_64",
+                target_feature = "sse4.2"
+            ))]
             /// Returns the longest string that fits the rule (simd optimized)
             ///
             /// *Streaming version* will return a Err::Incomplete(Needed::Unknown) if the pattern reaches the end of the input.
@@ -177,7 +181,11 @@ macro_rules! compile_lookup {
             }
 
             #[inline]
-            #[cfg(all(feature="simd", target_feature="sse3"))]
+            #[cfg(all(
+                feature = "simd",
+                target_arch = "x86_64",
+                target_feature = "sse4.2"
+            ))]
             /// Returns the longest string that fits the rule (simd optimized)
             fn take_while_complete_simd(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
                 use std::arch::x86_64::{
@@ -278,9 +286,17 @@ macro_rules! compile_lookup {
             ///
             /// *Streaming version* will return a Err::Incomplete(Needed::Unknown) if the pattern reaches the end of the input.
             pub fn take_while_fast(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
-                #[cfg(all(feature="simd", target_feature="sse3"))]
+                #[cfg(all(
+                    feature = "simd",
+                    target_arch = "x86_64",
+                    target_feature = "sse4.2"
+                ))]
                 let result = take_while_simd(input);
-                #[cfg(any(not(feature="simd"), not(target_feature="sse3")))]
+                #[cfg(not(all(
+                    feature = "simd",
+                    target_arch = "x86_64",
+                    target_feature = "sse4.2"
+                )))]
                 let result = take_while(input);
                 result
             }
@@ -289,9 +305,17 @@ macro_rules! compile_lookup {
             #[allow(dead_code)]
             /// Returns the longest string that fits the rule (using simd if enabled)
             pub fn take_while_complete_fast(input: &[u8]) -> nom::IResult<&[u8], &[u8]> {
-                #[cfg(all(feature="simd", target_feature="sse3"))]
+                #[cfg(all(
+                    feature = "simd",
+                    target_arch = "x86_64",
+                    target_feature = "sse4.2"
+                ))]
                 let result = take_while_complete_simd(input);
-                #[cfg(any(not(feature="simd"), not(target_feature="sse3")))]
+                #[cfg(not(all(
+                    feature = "simd",
+                    target_arch = "x86_64",
+                    target_feature = "sse4.2"
+                )))]
                 let result = take_while_complete(input);
                 result
             }

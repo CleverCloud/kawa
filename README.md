@@ -3,6 +3,11 @@
 Agnostic representation of HTTP/1.1 and HTTP/2.0 for parsing, generating and translating HTTP
 messages, with zero-copy, made for Sōzu.
 
+## SIMD support
+
+The default `simd` feature uses the optimized parser on `x86_64` targets compiled with SSE4.2.
+Other architectures and x86_64 targets without SSE4.2 automatically use the scalar parser.
+
 # Principles
 
 Consider the following HTTP/1.1 response stored in a `Buffer`:
