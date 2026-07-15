@@ -178,6 +178,103 @@ Transfer-Encoding: xchunked\r\n\r\n";
     }
 }
 
+/// Returns the value of the first non-elided header matching `name`.
+fn header_value<'a>(req: &'a Kawa<SliceBuffer<'a>>, name: &[u8]) -> Option<&'a [u8]> {
+    let buf = req.storage.buffer();
+    req.blocks.iter().find_map(|block| match block {
+        Block::Header(header) => {
+            let key = header.key.data_opt(buf)?;
+            if key.eq_ignore_ascii_case(name) {
+                header.val.data_opt(buf)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn header_value_excludes_surrounding_ows() {
+    // RFC 9112 §5: "A field value does not include leading or trailing
+    // whitespace." Leading OWS was already stripped (the `take_while` after
+    // the colon), but `achar` accepts SP/HTAB, so trailing OWS was swallowed
+    // into the stored value. Two distinct defects followed, both fixed by
+    // trimming the value at parse time:
+    //
+    //   * `Transfer-Encoding: chunked\t` selects chunked framing (the value
+    //     is OWS-trimmed to decide the final coding) yet was FORWARDED
+    //     verbatim. A peer that does not itself trim then sees a coding it
+    //     does not recognise and -- the Content-Length having been elided
+    //     per RFC 9110 §6.3 -- no length either, so it reads the chunked
+    //     body as a pipelined message: a TE.TE desync. Deciding framing on a
+    //     normalized reading while forwarding the un-normalized bytes is the
+    //     gap; forward the coding we actually framed on.
+    //
+    //   * `Content-Length: 5 ` is a legal field value, but `"5 ".parse()`
+    //     returned None and the request was rejected outright.
+    let mut buffer = vec![0; 4096];
+
+    // 1. the forwarded Transfer-Encoding is the coding we framed on
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Transfer-Encoding: chunked\t\r\n\r\n0\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write_all(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert_eq!(req.body_size, BodySize::Chunked);
+        assert!(!req.is_error());
+        assert_eq!(
+            header_value(&req, b"transfer-encoding"),
+            Some(&b"chunked"[..]),
+            "the Transfer-Encoding we framed on must be forwarded canonically, \
+             not as the obfuscated spelling we received"
+        );
+    }
+
+    // 2. trailing OWS no longer rejects a legal Content-Length
+    {
+        const REQUEST: &[u8] = b"\
+POST / HTTP/1.1\r\n\
+Host: example.com\r\n\
+Content-Length: 5 \r\n\r\nHello";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write_all(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(!req.is_error());
+        assert_eq!(req.body_size, BodySize::Length(5));
+    }
+
+    // 3. the rule is general, not Transfer-Encoding specific: leading and
+    //    trailing OWS around any field value are not part of the value.
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+X-Custom: \tvalue \t\r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write_all(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(!req.is_error());
+        assert_eq!(header_value(&req, b"x-custom"), Some(&b"value"[..]));
+    }
+
+    // 4. an all-OWS field value trims to empty rather than to whitespace
+    {
+        const REQUEST: &[u8] = b"\
+GET / HTTP/1.1\r\n\
+Host: example.com\r\n\
+X-Empty: \t \r\n\r\n";
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write_all(REQUEST).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(!req.is_error());
+        assert_eq!(header_value(&req, b"x-empty"), Some(&b""[..]));
+    }
+}
+
 #[test]
 fn transfer_encoding_ows_elides_content_length() {
     // "Transfer-Encoding: chunked\t" (trailing tab) alongside a

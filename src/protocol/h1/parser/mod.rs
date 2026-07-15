@@ -10,7 +10,7 @@ use crate::{
     protocol::{
         h1::parser::primitives::{
             crlf, parse_chunk_header, parse_header, parse_header_or_cookie, parse_request_line,
-            parse_response_line, parse_single_crumb, parse_url,
+            parse_response_line, parse_single_crumb, parse_url, trim_ows,
         },
         utils::compare_no_case,
     },
@@ -50,19 +50,6 @@ fn handle_recovery_error<T: AsBuffer>(
         }
         NomErr::Incomplete(_) => kawa.parsing_phase,
     }
-}
-
-/// Trims leading and trailing optional whitespace (OWS) as defined by
-/// RFC 9110 §5.6.3: space (0x20) and horizontal tab (0x09).
-#[inline]
-fn trim_ows(mut data: &[u8]) -> &[u8] {
-    while let [b' ' | b'\t', rest @ ..] = data {
-        data = rest;
-    }
-    while let [rest @ .., b' ' | b'\t'] = data {
-        data = rest;
-    }
-    data
 }
 
 /// Returns true if the FINAL comma-separated transfer-coding token of a
@@ -173,9 +160,11 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     BodySize::Chunked => header.elide(),
                 }
             }
-            // Transfer-Encoding header lines are intentionally left in place
-            // (forwarded as received); their combined framing was resolved by
-            // the pre-scan above.
+            // Transfer-Encoding header lines are intentionally left in place;
+            // their combined framing was resolved by the pre-scan above. Their
+            // values carry no leading/trailing OWS (RFC 9112 §5 -- stripped at
+            // parse time), so what is forwarded is the coding we framed on,
+            // never an obfuscated spelling of it.
         }
     }
     if transfer_encoding_present {
