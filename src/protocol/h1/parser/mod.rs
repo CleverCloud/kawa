@@ -52,6 +52,29 @@ fn handle_recovery_error<T: AsBuffer>(
     }
 }
 
+/// Trims leading and trailing optional whitespace (OWS) as defined by
+/// RFC 9110 §5.6.3: space (0x20) and horizontal tab (0x09).
+#[inline]
+fn trim_ows(mut data: &[u8]) -> &[u8] {
+    while let [b' ' | b'\t', rest @ ..] = data {
+        data = rest;
+    }
+    while let [rest @ .., b' ' | b'\t'] = data {
+        data = rest;
+    }
+    data
+}
+
+/// Returns true if the FINAL comma-separated transfer-coding token of a
+/// Transfer-Encoding header value is `chunked`, case-insensitively, once
+/// OWS has been trimmed from around the token (RFC 9112 §6.1).
+#[inline]
+fn ends_with_chunked_coding(val: &[u8]) -> bool {
+    const CHUNKED: &[u8] = b"chunked";
+    let last_token = val.rsplit(|&b| b == b',').next().unwrap_or(val);
+    compare_no_case(trim_ows(last_token), CHUNKED)
+}
+
 fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
     let buf = kawa.storage.buffer();
 
@@ -74,7 +97,29 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
         _ => (Store::Empty, Store::Empty),
     };
 
-    let mut content_length = None;
+    // Transfer-Encoding is resolved up front, before Content-Length, because
+    // repeated Transfer-Encoding field lines combine (RFC 9110 §5.3) and the
+    // combined final transfer-coding is the final coding of the LAST line: a
+    // split "gzip" then "chunked" frames as chunked, while "chunked" then a
+    // later non-chunked line (e.g. "identity") does NOT -- the combined final
+    // coding wins, so an earlier "chunked" line must never latch chunked
+    // framing on its own. Knowing Transfer-Encoding presence up front also lets
+    // Content-Length processing honor RFC 9110 §6.3 (a present Transfer-Encoding
+    // overrides Content-Length) regardless of header order.
+    let mut transfer_encoding_present = false;
+    let mut transfer_encoding_final_chunked = false;
+    for block in &kawa.blocks {
+        if let Block::Header(header) = block {
+            if let Store::Slice(key) = &header.key {
+                if compare_no_case(key.data(buf), b"transfer-encoding") {
+                    transfer_encoding_present = true;
+                    transfer_encoding_final_chunked =
+                        ends_with_chunked_coding(header.val.data(buf));
+                }
+            }
+        }
+    }
+
     for block in &mut kawa.blocks {
         if let Block::Header(header) = block {
             let Store::Slice(key) = &header.key else {
@@ -88,6 +133,19 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 }
                 header.elide(); // Host header is elided
             } else if compare_no_case(key, b"content-length") {
+                if transfer_encoding_present {
+                    // RFC 9110 §6.3: when both Transfer-Encoding and
+                    // Content-Length are present, the Transfer-Encoding
+                    // overrides the Content-Length. Drop every Content-Length
+                    // so a single, unambiguous framing reaches downstream
+                    // (anti-smuggling), and do not length-reconcile a value
+                    // that no longer frames the body.
+                    warn!(
+                        "Found both a Transfer-Encoding and a Content-Length, ignoring the latter"
+                    );
+                    header.elide();
+                    continue;
+                }
                 let length = match header.val.data(buf).parse_to() {
                     Some(length) => length,
                     None => {
@@ -98,13 +156,7 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                 };
                 match kawa.body_size {
                     BodySize::Empty => {
-                        content_length = Some(header);
                         kawa.body_size = BodySize::Length(length);
-                    }
-                    BodySize::Chunked => {
-                        warn!("Found both a Transfer-Encoding and a Content-Length, ignoring the latter");
-                        header.elide();
-                        continue;
                     }
                     BodySize::Length(previous_length) => {
                         if previous_length != length {
@@ -115,29 +167,35 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                             header.elide();
                         }
                     }
-                }
-            } else if compare_no_case(key, b"transfer-encoding") {
-                let val = header.val.data(buf);
-                const CHUNKED: &[u8] = b"chunked";
-                if val.len() >= CHUNKED.len()
-                    && compare_no_case(&val[val.len() - CHUNKED.len()..], CHUNKED)
-                {
-                    match kawa.body_size {
-                        BodySize::Empty => {}
-                        BodySize::Chunked => {
-                            warn!("Found multiple Transfer-Encoding");
-                        }
-                        BodySize::Length(_) => {
-                            warn!("Found both a Content-Length and a Transfer-Encoding, ignoring the former");
-                            if let Some(content_length) = content_length.take() {
-                                content_length.elide();
-                            }
-                        }
-                    }
-                    kawa.body_size = BodySize::Chunked;
+                    // Unreachable while `transfer_encoding_present` is false
+                    // (chunked framing is only selected after this loop); elide
+                    // defensively rather than panic on network-controlled input.
+                    BodySize::Chunked => header.elide(),
                 }
             }
+            // Transfer-Encoding header lines are intentionally left in place
+            // (forwarded as received); their combined framing was resolved by
+            // the pre-scan above.
         }
+    }
+    if transfer_encoding_present {
+        if transfer_encoding_final_chunked {
+            // The combined Transfer-Encoding ends in chunked -> chunked
+            // framing. Any Content-Length was already elided above.
+            kawa.body_size = BodySize::Chunked;
+        } else if kawa.kind == Kind::Request {
+            // RFC 9112 §6.3: a REQUEST whose combined Transfer-Encoding does
+            // not end in chunked has no reliably determinable body length, so
+            // reject rather than forward ambiguous framing.
+            kawa.parsing_phase
+                .error("Transfer-Encoding present without chunked as the final coding".into());
+            return;
+        }
+        // else: a RESPONSE with a non-chunked-final Transfer-Encoding is
+        // spec-valid and close-delimited (read until connection close). The
+        // Content-Length was removed above, so body_size stays Empty; a leading
+        // `chunked` line does NOT force chunked framing here, because the
+        // combined final coding is what determines message framing.
     }
     match &mut kawa.detached.status_line {
         StatusLine::Request {
