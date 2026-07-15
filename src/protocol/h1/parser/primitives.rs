@@ -233,6 +233,19 @@ pub fn parse_response_line(i: &[u8]) -> IResult<&[u8], (Version, &[u8], u16, &[u
 }
 
 /// parse a HTTP header, including terminating CRLF
+/// Trims leading and trailing optional whitespace (OWS) as defined by
+/// RFC 9110 §5.6.3: space (0x20) and horizontal tab (0x09).
+#[inline]
+pub fn trim_ows(mut data: &[u8]) -> &[u8] {
+    while let [b' ' | b'\t', rest @ ..] = data {
+        data = rest;
+    }
+    while let [rest @ .., b' ' | b'\t'] = data {
+        data = rest;
+    }
+    data
+}
+
 /// if it is a cookie header, nothing is returned and parse_single_crumb should be called
 ///
 /// example: `Content-Length: 42\r\n`
@@ -247,7 +260,7 @@ pub fn parse_header_or_cookie(i: &[u8]) -> IResult<&[u8], Option<(&[u8], &[u8])>
     }
     let (i, val) = achar::take_while_fast(i)?;
     let (i, _) = crlf(i)?;
-    Ok((i, Some((key, val))))
+    Ok((i, Some((key, trim_ows(val)))))
 }
 
 /// parse a HTTP header, including terminating CRLF
@@ -261,7 +274,7 @@ pub fn parse_header(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
     let (i, _) = take_while(AsChar::is_space).parse(i)?;
     let (i, val) = achar::take_while_fast(i)?;
     let (i, _) = crlf(i)?;
-    Ok((i, (key, val)))
+    Ok((i, (key, trim_ows(val))))
 }
 
 /// parse a single crumb from a Cookie header
