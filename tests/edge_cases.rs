@@ -4,14 +4,14 @@ use kawa::{h1, Block, BodySize, Buffer, Kawa, Kind, SliceBuffer};
 
 #[test]
 fn compressed_chunked() {
-    const REQUEST: &'static [u8] = b"\
+    const REQUEST: &[u8] = b"\
 GET /image.jpg HTTP/1.1\r\n\
 Host: www.compressed.com\r\n\
 Transfer-Encoding: gzip,chunked\r\n\r\n0\r\n\r\n";
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQUEST).expect("write");
+    req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
     assert!(req.is_streaming());
@@ -21,12 +21,12 @@ Transfer-Encoding: gzip,chunked\r\n\r\n0\r\n\r\n";
 
 #[test]
 fn multiple_content_length() {
-    const REQUEST_VALID: &'static [u8] = b"\
+    const REQUEST_VALID: &[u8] = b"\
 GET /image.jpg HTTP/1.1\r\n\
 Host: www.compressed.com\r\n\
 Content-Length: 3\r\n\
 Content-Length: 3\r\n\r\nABC";
-    const REQUEST_INVALID: &'static [u8] = b"\
+    const REQUEST_INVALID: &[u8] = b"\
 GET /image.jpg HTTP/1.1\r\n\
 Host: www.compressed.com\r\n\
 Content-Length: 3\r\n\
@@ -34,7 +34,7 @@ Content-Length: 4\r\n\r\nABCD";
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQUEST_VALID).expect("write");
+    req.storage.write_all(REQUEST_VALID).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
     assert!(req.body_size == BodySize::Length(3));
@@ -42,7 +42,7 @@ Content-Length: 4\r\n\r\nABCD";
     assert!(req.storage.unparsed_data().is_empty());
 
     req.clear();
-    req.storage.write(REQUEST_INVALID).expect("write");
+    req.storage.write_all(REQUEST_INVALID).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
     assert!(req.is_error());
@@ -50,7 +50,7 @@ Content-Length: 4\r\n\r\nABCD";
 
 #[test]
 fn multiple_length_information() {
-    const REQUEST: &'static [u8] = b"\
+    const REQUEST: &[u8] = b"\
 GET /image.jpg HTTP/1.1\r\n\
 Host: www.compressed.com\r\n\
 Content-Length: 3\r\n\
@@ -61,13 +61,13 @@ Content-Length: 4\r\n\r\n0\r\n\r\n";
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQUEST).expect("write");
+    req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
     assert!(req.is_terminated());
     assert!(req.is_streaming());
     assert!(req.storage.unparsed_data().is_empty());
-    for block in req.blocks {
+    for block in &req.blocks {
         if let Block::Header(header) = block {
             if let Some(key) = header.key.data_opt(&buffer) {
                 assert_ne!(key, b"Content-Length");
@@ -96,7 +96,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert_eq!(req.body_size, BodySize::Chunked);
         assert!(!req.is_error());
@@ -109,7 +109,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding: chunked\t\r\n\r\n0\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert_eq!(req.body_size, BodySize::Chunked);
         assert!(!req.is_error());
@@ -122,7 +122,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding:  chunked \r\n\r\n0\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert_eq!(req.body_size, BodySize::Chunked);
         assert!(!req.is_error());
@@ -135,7 +135,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert_eq!(req.body_size, BodySize::Chunked);
         assert!(!req.is_error());
@@ -148,7 +148,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding: chunked, gzip\r\n\r\nabc";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert!(req.is_error());
     }
@@ -160,7 +160,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding: identity\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert!(req.is_error());
     }
@@ -172,7 +172,7 @@ GET / HTTP/1.1\r\n\
 Host: example.com\r\n\
 Transfer-Encoding: xchunked\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert!(req.is_error());
     }
@@ -190,7 +190,7 @@ Content-Length: 3\r\n\
 Transfer-Encoding: chunked\t\r\n\r\n0\r\n\r\n";
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQUEST).expect("write");
+    req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     assert_eq!(req.body_size, BodySize::Chunked);
     assert!(!req.is_error());
@@ -223,7 +223,7 @@ Host: example.com\r\n\
 Transfer-Encoding: gzip\r\n\
 Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert_eq!(req.body_size, BodySize::Chunked);
         assert!(!req.is_error());
@@ -240,7 +240,7 @@ Host: example.com\r\n\
 Transfer-Encoding: chunked\r\n\
 Transfer-Encoding: identity\r\n\r\n";
         let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-        req.storage.write(REQUEST).expect("write");
+        req.storage.write_all(REQUEST).expect("write");
         h1::parse(&mut req, &mut h1::NoCallbacks);
         assert!(req.is_error());
     }
@@ -262,7 +262,7 @@ fn transfer_encoding_response_non_chunked_final_is_not_an_error() {
 HTTP/1.1 200 OK\r\n\
 Transfer-Encoding: gzip\r\n\r\n";
         let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
-        resp.storage.write(RESPONSE).expect("write");
+        resp.storage.write_all(RESPONSE).expect("write");
         h1::parse(&mut resp, &mut h1::NoCallbacks);
         assert!(!resp.is_error());
         // No Content-Length was present, so the pre-fix reference value
@@ -279,7 +279,7 @@ Transfer-Encoding: gzip\r\n\r\n";
 HTTP/1.1 200 OK\r\n\
 Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
         let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
-        resp.storage.write(RESPONSE).expect("write");
+        resp.storage.write_all(RESPONSE).expect("write");
         h1::parse(&mut resp, &mut h1::NoCallbacks);
         assert_eq!(resp.body_size, BodySize::Chunked);
         assert!(!resp.is_error());
@@ -297,7 +297,7 @@ HTTP/1.1 200 OK\r\n\
 Transfer-Encoding: chunked\r\n\
 Transfer-Encoding: identity\r\n\r\n";
         let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
-        resp.storage.write(RESPONSE).expect("write");
+        resp.storage.write_all(RESPONSE).expect("write");
         h1::parse(&mut resp, &mut h1::NoCallbacks);
         assert!(!resp.is_error());
         assert_eq!(resp.body_size, BodySize::Empty);
@@ -306,14 +306,14 @@ Transfer-Encoding: identity\r\n\r\n";
 
 #[test]
 fn malformed_cookies_separator() {
-    const REQUEST: &'static [u8] = b"\
+    const REQUEST: &[u8] = b"\
 GET /cookies HTTP/1.1\r\n\
 Host: www.bad.com\r\n\
 Cookie: a=1; b=2;c=3; foo; ==bar=\r\n\r\n0\r\n\r\n";
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQUEST).expect("write");
+    req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
     assert!(req.storage.unparsed_data().is_empty());
@@ -337,14 +337,14 @@ Cookie: a=1; b=2;c=3; foo; ==bar=\r\n\r\n0\r\n\r\n";
 
 #[test]
 fn spaces_in_cookie() {
-    const REQUEST: &'static [u8] = b"\
+    const REQUEST: &[u8] = b"\
 GET /cookies HTTP/1.1\r\n\
 Host: www.bad.com\r\n\
 Cookie: a=b;  c d e  = fg h ;i=j;  k   l=  mn  \r\n\r\n0\r\n\r\n";
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQUEST).expect("write");
+    req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
     assert!(req.storage.unparsed_data().is_empty());

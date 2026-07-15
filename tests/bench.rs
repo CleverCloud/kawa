@@ -4,7 +4,7 @@ use kawa::{h1, Buffer, Kawa, Kind, SliceBuffer};
 
 #[test]
 fn bench_long() {
-    const REQ_LONG: &'static [u8] = b"\
+    const REQ_LONG: &[u8] = b"\
 GET /wp-content/uploads/2010/03/hello-kitty-darth-vader-pink.jpg HTTP/1.1\r\n\
 Host: www.kittyhell.com\r\n\
 User-Agent: Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; ja-JP-mac; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3 Pathtraq/0.9\r\n\
@@ -18,17 +18,17 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
 
     let mut buffer = vec![0; 4096];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQ_LONG).expect("write");
+    req.storage.write_all(REQ_LONG).expect("write");
     req.blocks.reserve(16);
     req.detached.jar.reserve(16);
     for _ in 0..10_000_000 {
         req.clear();
         req.storage.clear();
         req.storage.fill(REQ_LONG.len());
-        black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        h1::parse(black_box(&mut req), &mut h1::NoCallbacks);
         if !req.is_main_phase() {
             kawa::debug_kawa(&req);
-            assert!(false);
+            panic!("parser did not reach the main phase");
         }
     }
     kawa::debug_kawa(&req);
@@ -36,23 +36,23 @@ Cookie: wp_ozh_wsa_visits=2; wp_ozh_wsa_visit_lasttime=xxxxxxxxxx; foo; ==bar=; 
 
 #[test]
 fn bench_short() {
-    const REQ_SHORT: &'static [u8] = b"\
+    const REQ_SHORT: &[u8] = b"\
 GET / HTTP/1.0\r\n\
 Host: example.com\r\n\
 Connection: close\r\n\r\n";
 
     let mut buffer = vec![0; 512];
     let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
-    req.storage.write(REQ_SHORT).expect("write");
+    req.storage.write_all(REQ_SHORT).expect("write");
     req.blocks.reserve(16);
     for _ in 0..10_000_000 {
         req.clear();
         req.storage.clear();
         req.storage.fill(REQ_SHORT.len());
-        black_box(h1::parse(&mut req, &mut h1::NoCallbacks));
+        h1::parse(black_box(&mut req), &mut h1::NoCallbacks);
         if !req.is_main_phase() {
             kawa::debug_kawa(&req);
-            assert!(false);
+            panic!("parser did not reach the main phase");
         }
     }
     kawa::debug_kawa(&req);
