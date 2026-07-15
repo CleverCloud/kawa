@@ -5,13 +5,11 @@ use nom::{
     },
     character::{
         complete::char as char_complete,
-        is_space,
         streaming::{char, hex_digit1, one_of},
     },
     combinator::opt,
     error::{make_error, ErrorKind as NomErrorKind, ParseError},
-    sequence::tuple,
-    Err as NomError, IResult,
+    AsChar, Err as NomError, IResult, Parser,
 };
 
 use crate::{
@@ -169,18 +167,18 @@ compile_lookup!(pub achar => [0x00..0x08, 0x0A..0x1F, 0x7F..LAST_INVALID_CHAR]);
 
 #[inline]
 fn space(i: &[u8]) -> IResult<&[u8], char> {
-    char(' ')(i)
+    char(' ').parse(i)
 }
 
 #[inline]
 pub fn crlf(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    tag(b"\r\n")(i)
+    tag(&b"\r\n"[..]).parse(i)
 }
 
 #[inline]
 fn http_version(i: &[u8]) -> IResult<&[u8], Version> {
-    let (i, _) = tag(b"HTTP/1.")(i)?;
-    let (i, minor) = one_of("01")(i)?;
+    let (i, _) = tag(&b"HTTP/1."[..]).parse(i)?;
+    let (i, minor) = one_of("01").parse(i)?;
 
     Ok((
         i,
@@ -194,7 +192,7 @@ fn http_version(i: &[u8]) -> IResult<&[u8], Version> {
 
 #[inline]
 fn http_status(i: &[u8]) -> IResult<&[u8], (&[u8], u16)> {
-    let (i, status) = take(3usize)(i)?;
+    let (i, status) = take(3usize).parse(i)?;
     let code = std::str::from_utf8(status)
         .ok()
         .and_then(|status| status.parse::<u16>().ok());
@@ -242,8 +240,8 @@ pub fn parse_response_line(i: &[u8]) -> IResult<&[u8], (Version, &[u8], u16, &[u
 #[allow(clippy::type_complexity)]
 pub fn parse_header_or_cookie(i: &[u8]) -> IResult<&[u8], Option<(&[u8], &[u8])>> {
     let (i, key) = tchar::take_while_fast(i)?;
-    let (i, _) = tag(b":")(i)?;
-    let (i, _) = take_while(is_space)(i)?;
+    let (i, _) = tag(&b":"[..]).parse(i)?;
+    let (i, _) = take_while(AsChar::is_space).parse(i)?;
     if compare_no_case(key, b"cookie") {
         return Ok((i, None));
     }
@@ -259,8 +257,8 @@ pub fn parse_header_or_cookie(i: &[u8]) -> IResult<&[u8], Option<(&[u8], &[u8])>
 #[inline]
 pub fn parse_header(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
     let (i, key) = tchar::take_while_fast(i)?;
-    let (i, _) = tag(b":")(i)?;
-    let (i, _) = take_while(is_space)(i)?;
+    let (i, _) = tag(&b":"[..]).parse(i)?;
+    let (i, _) = take_while(AsChar::is_space).parse(i)?;
     let (i, val) = achar::take_while_fast(i)?;
     let (i, _) = crlf(i)?;
     Ok((i, (key, val)))
@@ -277,13 +275,13 @@ pub fn parse_header(i: &[u8]) -> IResult<&[u8], (&[u8], &[u8])> {
 #[allow(clippy::type_complexity)]
 pub fn parse_single_crumb(i: &[u8], first: bool) -> IResult<&[u8], (&[u8], &[u8])> {
     let i = if !first {
-        let (i, _) = tuple((tag(b";"), take_while(is_space)))(i)?;
+        let (i, _) = (tag(&b";"[..]), take_while(AsChar::is_space)).parse(i)?;
         i
     } else {
         i
     };
     let (i, key) = ck_char::take_while_fast(i)?;
-    let (i, val) = opt(tuple((tag(b"="), cv_char::take_while_fast)))(i)?;
+    let (i, val) = opt((tag(&b"="[..]), cv_char::take_while_fast)).parse(i)?;
 
     match val {
         Some((_, val)) => Ok((i, (key, val))),
@@ -436,8 +434,8 @@ pub fn parse_chunk_header(first: bool, i: &[u8]) -> IResult<&[u8], (&[u8], usize
 
 #[inline]
 fn userinfo(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    let (i, userinfo) = take_while_complete(is_userinfo_char)(i)?;
-    let (i, _) = char_complete('@')(i)?;
+    let (i, userinfo) = take_while_complete(is_userinfo_char).parse(i)?;
+    let (i, _) = char_complete('@').parse(i)?;
     Ok((i, userinfo))
 }
 
@@ -483,10 +481,10 @@ fn parse_absolute_form<'a>(
     i: &'a [u8],
     empty_path_replacer: &'static [u8],
 ) -> IResult<&'a [u8], (Store, Store)> {
-    let (i, _scheme) = take_while_complete(is_scheme_char)(i)?;
-    let (i, _) = tag_complete(b"://")(i)?;
-    let (i, _userinfo) = opt(userinfo)(i)?;
-    let (path, authority) = take_while_complete(is_authority_char)(i)?;
+    let (i, _scheme) = take_while_complete(is_scheme_char).parse(i)?;
+    let (i, _) = tag_complete(&b"://"[..]).parse(i)?;
+    let (i, _userinfo) = opt(userinfo).parse(i)?;
+    let (path, authority) = take_while_complete(is_authority_char).parse(i)?;
 
     let authority = Store::new_slice(buffer, authority);
     let path = if path.is_empty() {
