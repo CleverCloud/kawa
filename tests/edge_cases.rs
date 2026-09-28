@@ -49,6 +49,74 @@ Content-Length: 4\r\n\r\nABCD";
 }
 
 #[test]
+fn content_length_must_be_digits_only() {
+    // RFC 9110 §8.6: Content-Length = 1*DIGIT. `usize::from_str` also accepts
+    // one leading '+', so `+5` used to frame a 5-byte body on a value a peer
+    // may refuse or read differently, and was forwarded verbatim (CWE-444).
+    // The same header processing serves requests and responses.
+    const REFUSED: &[&[u8]] = &[
+        b"+5",
+        b"+0",
+        b"-0",
+        b"+",
+        b"",
+        b"0x5",
+        b"5 5",
+        // a list, even of identical values, stays refused as before
+        b"5, 5",
+        b"5.0",
+        // ARABIC-INDIC DIGIT FIVE
+        "\u{665}".as_bytes(),
+        // one past u64::MAX
+        b"18446744073709551616",
+    ];
+    const ACCEPTED: &[(&[u8], usize)] = &[(b"005", 5), (b"0", 0), (b"5", 5)];
+
+    let mut buffer = vec![0; 4096];
+    for kind in [Kind::Request, Kind::Response] {
+        let head: &[u8] = match kind {
+            Kind::Request => b"POST / HTTP/1.1\r\nHost: a\r\n",
+            Kind::Response => b"HTTP/1.1 200 OK\r\n",
+        };
+        for value in REFUSED {
+            let mut msg = head.to_vec();
+            msg.extend_from_slice(b"Content-Length: ");
+            msg.extend_from_slice(value);
+            msg.extend_from_slice(b"\r\n\r\nHello");
+            let mut kawa = Kawa::new(kind, Buffer::new(SliceBuffer(&mut buffer[..])));
+            kawa.storage.write_all(&msg).expect("write");
+            h1::parse(&mut kawa, &mut h1::NoCallbacks);
+            assert!(
+                kawa.is_error(),
+                "{kind:?} Content-Length {:?}: body_size={:?} phase={:?}",
+                String::from_utf8_lossy(value),
+                kawa.body_size,
+                kawa.parsing_phase
+            );
+        }
+        for (value, length) in ACCEPTED {
+            let mut msg = head.to_vec();
+            msg.extend_from_slice(b"Content-Length: ");
+            msg.extend_from_slice(value);
+            msg.extend_from_slice(b"\r\n\r\n");
+            msg.extend_from_slice(&b"Hello"[..*length]);
+            let mut kawa = Kawa::new(kind, Buffer::new(SliceBuffer(&mut buffer[..])));
+            kawa.storage.write_all(&msg).expect("write");
+            h1::parse(&mut kawa, &mut h1::NoCallbacks);
+            assert!(
+                !kawa.is_error(),
+                "{kind:?} Content-Length {:?}: phase={:?}",
+                String::from_utf8_lossy(value),
+                kawa.parsing_phase
+            );
+            assert_eq!(kawa.body_size, BodySize::Length(*length));
+            assert!(kawa.is_terminated());
+            assert!(kawa.storage.unparsed_data().is_empty());
+        }
+    }
+}
+
+#[test]
 fn multiple_length_information() {
     const REQUEST: &[u8] = b"\
 GET /image.jpg HTTP/1.1\r\n\
