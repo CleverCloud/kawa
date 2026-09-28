@@ -1,6 +1,8 @@
 use std::{io::Write, str::from_utf8};
 
-use kawa::{h1, Block, BodySize, Buffer, Kawa, Kind, OutBlock, SliceBuffer, Store};
+use kawa::{
+    h1, Block, BodySize, Buffer, Flags, Kawa, Kind, OutBlock, ParsingPhase, SliceBuffer, Store,
+};
 
 #[test]
 fn compressed_chunked() {
@@ -401,6 +403,108 @@ Transfer-Encoding: identity\r\n\r\n";
     }
 }
 
+/// The end-of-headers flags block the parser pushes right after
+/// `ParserCallbacks::on_headers`, which converters read to know whether the
+/// message ended with its headers.
+fn end_of_headers_flags(kawa: &Kawa<SliceBuffer>) -> Flags {
+    kawa.blocks
+        .iter()
+        .find_map(|block| match block {
+            Block::Flags(flags) if flags.end_header => Some(flags.clone()),
+            _ => None,
+        })
+        .expect("a parsed message carries its end-of-headers flags")
+}
+
+#[test]
+fn request_without_length_has_no_body() {
+    // RFC 9112 §6.3 rule 7: a request with neither Content-Length nor
+    // Transfer-Encoding has a zero-length body, whatever its method or
+    // version; read-until-close (rule 8) applies to responses only. A request
+    // pipelined behind it must stay unparsed instead of becoming its body
+    // (CWE-444).
+    const SECOND: &[u8] = b"GET /second HTTP/1.1\r\nHost: b\r\n\r\n";
+    const FIRSTS: &[&[u8]] = &[
+        b"GET /first HTTP/1.1\r\nHost: a\r\n\r\n",
+        b"HEAD /first HTTP/1.1\r\nHost: a\r\n\r\n",
+        b"DELETE /first HTTP/1.1\r\nHost: a\r\n\r\n",
+        b"POST /first HTTP/1.1\r\nHost: a\r\n\r\n",
+        b"POST /first HTTP/1.0\r\nHost: a\r\n\r\n",
+        b"POST /first HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\n\r\n",
+        b"GET /first HTTP/1.1\r\nHost: a\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        b"CONNECT a:443 HTTP/1.1\r\nHost: a:443\r\n\r\n",
+    ];
+
+    let mut buffer = vec![0; 4096];
+    for first in FIRSTS {
+        let name =
+            String::from_utf8_lossy(&first[..first.iter().position(|&b| b == b'\r').unwrap()]);
+        let mut req = Kawa::new(Kind::Request, Buffer::new(SliceBuffer(&mut buffer[..])));
+        req.storage.write_all(first).expect("write");
+        req.storage.write_all(SECOND).expect("write");
+        h1::parse(&mut req, &mut h1::NoCallbacks);
+        assert!(
+            req.is_terminated(),
+            "{name}: must end after its headers, got {:?}",
+            req.parsing_phase
+        );
+        assert_eq!(req.body_size, BodySize::Empty, "{name}");
+        assert!(end_of_headers_flags(&req).end_stream, "{name}");
+        assert!(
+            !req.blocks
+                .iter()
+                .any(|block| matches!(block, Block::Chunk(_))),
+            "{name}: no body chunk"
+        );
+        assert_eq!(req.storage.unparsed_data(), SECOND, "{name}");
+    }
+}
+
+#[test]
+fn response_without_length_is_close_delimited() {
+    // RFC 9112 §6.3 rule 8 is unchanged for responses: without Content-Length
+    // or Transfer-Encoding the body runs until the connection closes, so every
+    // byte is body and the message does not end.
+    let mut buffer = vec![0; 4096];
+    {
+        let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
+        resp.storage
+            .write_all(b"HTTP/1.1 200 OK\r\n\r\nHello")
+            .expect("write");
+        h1::parse(&mut resp, &mut h1::NoCallbacks);
+        assert_eq!(resp.parsing_phase, ParsingPhase::Body);
+        assert_eq!(resp.body_size, BodySize::Empty);
+        assert!(!end_of_headers_flags(&resp).end_stream);
+        assert!(resp.storage.unparsed_data().is_empty());
+        let buf = resp.storage.buffer();
+        let body: Vec<u8> = resp
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                Block::Chunk(chunk) => Some(chunk.data.data(buf)),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        assert_eq!(body, b"Hello");
+    }
+    // 1xx, 204 and 304 still end with their headers.
+    for response in [
+        &b"HTTP/1.1 100 Continue\r\n\r\n"[..],
+        b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n",
+        b"HTTP/1.1 204 No Content\r\n\r\n",
+        b"HTTP/1.1 304 Not Modified\r\n\r\n",
+    ] {
+        let mut resp = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
+        resp.storage.write_all(response).expect("write");
+        h1::parse(&mut resp, &mut h1::NoCallbacks);
+        assert!(resp.is_terminated());
+        assert_eq!(resp.body_size, BodySize::Length(0));
+        assert!(end_of_headers_flags(&resp).end_stream);
+    }
+}
+
 #[test]
 fn malformed_cookies_separator() {
     const REQUEST: &[u8] = b"\
@@ -413,7 +517,10 @@ Cookie: a=1; b=2;c=3; foo; ==bar=\r\n\r\n0\r\n\r\n";
     req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
-    assert!(req.storage.unparsed_data().is_empty());
+    // No Content-Length or Transfer-Encoding: the request ends with its
+    // headers (RFC 9112 §6.3 rule 7), so the trailing bytes are not its body.
+    assert!(req.is_terminated());
+    assert_eq!(req.storage.unparsed_data(), b"0\r\n\r\n");
     for (i, (k, v)) in [
         ("a", "1"),
         ("b", "2"),
@@ -444,7 +551,10 @@ Cookie: a=b;  c d e  = fg h ;i=j;  k   l=  mn  \r\n\r\n0\r\n\r\n";
     req.storage.write_all(REQUEST).expect("write");
     h1::parse(&mut req, &mut h1::NoCallbacks);
     kawa::debug_kawa(&req);
-    assert!(req.storage.unparsed_data().is_empty());
+    // No Content-Length or Transfer-Encoding: the request ends with its
+    // headers (RFC 9112 §6.3 rule 7), so the trailing bytes are not its body.
+    assert!(req.is_terminated());
+    assert_eq!(req.storage.unparsed_data(), b"0\r\n\r\n");
     for (i, (k, v)) in [
         ("a", "b"),
         ("c d e  ", " fg h "),
