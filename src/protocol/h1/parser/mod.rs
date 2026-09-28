@@ -449,6 +449,12 @@ pub fn parse<T: AsBuffer, C: ParserCallbacks<T>>(kawa: &mut Kawa<T>, callbacks: 
                     kawa.expects = length;
                     ParsingPhase::Body
                 }
+                // RFC 9112 §6.3 rule 7: a request with neither Content-Length
+                // nor Transfer-Encoding has no body. Ending it here leaves a
+                // pipelined request unparsed instead of taking it as a body.
+                BodySize::Empty if kawa.kind == Kind::Request => ParsingPhase::Terminated,
+                // RFC 9112 §6.3 rule 8: such a response is read until the
+                // connection closes.
                 BodySize::Empty => {
                     kawa.expects = 1;
                     ParsingPhase::Body
