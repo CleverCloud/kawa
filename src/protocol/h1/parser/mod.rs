@@ -133,9 +133,14 @@ fn process_headers<T: AsBuffer>(kawa: &mut Kawa<T>) {
                     header.elide();
                     continue;
                 }
-                let length = match header.val.data(buf).parse_to() {
-                    Some(length) => length,
-                    None => {
+                // RFC 9110 §8.6: Content-Length = 1*DIGIT. Check the bytes
+                // before parsing: `usize::from_str` also accepts a leading
+                // '+', and the value is forwarded with its original spelling.
+                // The parse still refuses the empty value and an overflow.
+                let val = header.val.data(buf);
+                let length = match val.iter().all(u8::is_ascii_digit).then(|| val.parse_to()) {
+                    Some(Some(length)) => length,
+                    _ => {
                         kawa.parsing_phase
                             .error("Invalid Content-Length field value".into());
                         return;
