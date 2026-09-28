@@ -608,16 +608,18 @@ impl Store {
                 }
             }
             Store::Alloc(data, index) => {
-                if amount >= data.len() - index as usize {
-                    (amount - data.len() + index as usize, None)
+                let left = data.len() - index as usize;
+                if amount >= left {
+                    (amount - left, None)
                 } else {
                     (0, Some(Store::Alloc(data, index + amount as u32)))
                 }
             }
             #[cfg(feature = "rc-alloc")]
             Store::Shared(data, index) => {
-                if amount >= data.len() - index as usize {
-                    (amount - data.len() + index as usize, None)
+                let left = data.len() - index as usize;
+                if amount >= left {
+                    (amount - left, None)
                 } else {
                     (0, Some(Store::Shared(data, index + amount as u32)))
                 }

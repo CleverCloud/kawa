@@ -1,6 +1,6 @@
 use std::{io::Write, str::from_utf8};
 
-use kawa::{h1, Block, BodySize, Buffer, Kawa, Kind, SliceBuffer};
+use kawa::{h1, Block, BodySize, Buffer, Kawa, Kind, OutBlock, SliceBuffer, Store};
 
 #[test]
 fn compressed_chunked() {
@@ -460,4 +460,38 @@ Cookie: a=b;  c d e  = fg h ;i=j;  k   l=  mn  \r\n\r\n0\r\n\r\n";
         assert_eq!(Ok(k), key);
         assert_eq!(Ok(v), val);
     }
+}
+
+/// Consume a prefix of an owned store, then exactly its remainder, then a store boundary plus
+/// some bytes of the next store. A non-zero store index must not make `Store::consume`
+/// underflow when the amount covers the remainder but not the whole allocation.
+fn consume_owned_store_with_index(store: fn(&[u8]) -> Store) {
+    let mut buffer = [0; 64];
+    let mut kawa = Kawa::new(Kind::Response, Buffer::new(SliceBuffer(&mut buffer[..])));
+
+    kawa.push_out(store(b"0123456789"));
+    kawa.consume(4);
+    kawa.consume(6);
+    assert_eq!(kawa.out.len(), 0);
+
+    kawa.push_out(store(b"0123456789"));
+    kawa.push_out(store(b"abcdef"));
+    kawa.consume(4);
+    kawa.consume(8);
+    assert_eq!(kawa.out.len(), 1);
+    match kawa.out.iter().next() {
+        Some(OutBlock::Store(store)) => assert_eq!(store.data(&[]), b"cdef"),
+        other => panic!("unexpected out block: {other:?}"),
+    }
+}
+
+#[test]
+fn consume_alloc_store_with_index() {
+    consume_owned_store_with_index(Store::from_slice);
+}
+
+#[cfg(feature = "rc-alloc")]
+#[test]
+fn consume_shared_store_with_index() {
+    consume_owned_store_with_index(|data| Store::Shared(std::rc::Rc::from(data), 0));
 }
